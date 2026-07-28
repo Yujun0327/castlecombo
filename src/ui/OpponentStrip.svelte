@@ -1,129 +1,247 @@
 <script lang="ts">
+  import { cardById } from '../data'
   import type { Seat } from '../engine'
-  import { discounts, GEMS, prestige, TOKEN_COLORS } from '../engine'
   import type { BaseSession } from '../app/session.svelte'
-  import GemIcon from './GemIcon.svelte'
+  import { scores } from '../app/session.svelte'
+  import { wobblyPolygon } from './wobble'
+  import CoinIcon from './CoinIcon.svelte'
+  import KeyIcon from './KeyIcon.svelte'
+  import Modal from './Modal.svelte'
+  import MyGrid from './MyGrid.svelte'
+  import ShieldIcon from './ShieldIcon.svelte'
 
   interface Props {
     session: BaseSession
     seat: Seat
   }
 
-  let { session, seat }: Props = $props()
+  const { session, seat }: Props = $props()
 
-  const player = $derived(session.visibleState.players[seat])
-  const disc = $derived(discounts(session.state.players[seat]))
-  const active = $derived(session.actor === seat && !session.state.result)
+  const player = $derived(session.state.players[seat])
+  const acting = $derived(session.state.turn === seat && !session.state.result)
+  const score = $derived(scores(session.state)[seat])
+
+  /** Placements shifted to a 0..2 window for the thumbnail. */
+  const miniCells = $derived.by(() => {
+    if (player.placed.length === 0) return []
+    const minX = Math.min(...player.placed.map((p) => p.x))
+    const minY = Math.min(...player.placed.map((p) => p.y))
+    return player.placed.map((p) => ({ ...p, x: p.x - minX, y: p.y - minY }))
+  })
+
+  let open = $state(false)
+
+  const thumbOutline = (i: number) =>
+    wobblyPolygon(
+      [
+        { x: 1.5, y: 1.5 },
+        { x: 26.5, y: 1.5 },
+        { x: 26.5, y: 26.5 },
+        { x: 1.5, y: 26.5 },
+      ],
+      1,
+      i * 17 + seat * 5 + 900,
+    )
 </script>
 
-<div class="strip" class:active>
-  <div class="who">
+<button class="strip panel" class:acting onclick={() => (open = true)} aria-label="inspect {session.names[seat]}'s kingdom">
+  <span class="who">
     <span class="name">{session.names[seat]}</span>
-    <span class="score foil-text tabular">{prestige(session.state.players[seat])}</span>
-  </div>
-  <div class="row" aria-label="tokens">
-    {#each TOKEN_COLORS as c (c)}
-      {#if player.tokens[c] > 0}
-        <span class="mini">
-          <GemIcon kind={c} size={14} />
-          <span class="tabular">{player.tokens[c]}</span>
-        </span>
-      {/if}
-    {/each}
-  </div>
-  <div class="row" aria-label="card discounts">
-    {#each GEMS as g (g)}
-      {#if disc[g] > 0}
-        <span class="mini card-pip">
-          <GemIcon kind={g} size={14} />
-          <span class="tabular">{disc[g]}</span>
-        </span>
-      {/if}
-    {/each}
-    {#if player.reserved.length > 0}
-      <span class="mini reserved" title="reserved cards">
-        {#each player.reserved as r, i (i)}
-          <span class="mini-back"></span>
-        {/each}
+    {#if acting}<span class="turn-mark rubric">their turn</span>{/if}
+  </span>
+
+  <span class="purse-line">
+    <span class="stat tabular"><CoinIcon size={15} />{player.gold}</span>
+    <span class="stat tabular"><KeyIcon size={15} />{player.keys}</span>
+    <span class="stat score gilt tabular">{score}</span>
+  </span>
+
+  <span class="thumb" aria-hidden="true">
+    {#each Array.from({ length: 9 }, (_, i) => i) as i (i)}
+      {@const x = i % 3}
+      {@const y = Math.floor(i / 3)}
+      {@const p = miniCells.find((c) => c.x === x && c.y === y)}
+      <span class="thumb-cell" class:facedown={p?.faceDown}
+        class:castle={p && !p.faceDown && cardById.get(p.card)!.deck === 'castle'}
+        class:village={p && !p.faceDown && cardById.get(p.card)!.deck === 'village'}
+      >
+        <svg viewBox="0 0 28 28" aria-hidden="true">
+          <path d={thumbOutline(i)} class="thumb-line" />
+          {#if p?.faceDown}
+            <path d="M4 24 Q14.4 13.6 24 4 M4 14 Q8.8 9.3 14 4 M14 24 Q19.2 18.7 24 14" class="hatch" />
+          {/if}
+        </svg>
+        {#if p && !p.faceDown}
+          <span class="thumb-shields">
+            {#each cardById.get(p.card)!.shields as s, j (j)}
+              <ShieldIcon type={s} size={10} />
+            {/each}
+          </span>
+        {/if}
       </span>
-    {/if}
-    {#if player.nobles.length > 0}
-      <span class="mini noble tabular" title="nobles">♛ {player.nobles.length}</span>
-    {/if}
-  </div>
-</div>
+    {/each}
+  </span>
+</button>
+
+{#if open}
+  <Modal onClose={() => (open = false)}>
+    <div class="inspect">
+      <h3 class="inspect-title">{session.names[seat]}&rsquo;s kingdom</h3>
+      <p class="inspect-stats tabular">
+        <CoinIcon size={17} />{player.gold} &nbsp; <KeyIcon size={17} />{player.keys} &nbsp;
+        <span class="gilt">{score} pts so far</span>
+      </p>
+      {#if player.placed.length > 0}
+        <MyGrid placed={player.placed} compact />
+      {:else}
+        <p class="empty-prose">An empty page — their first card is yet to be entered.</p>
+      {/if}
+      <button class="btn btn--quiet" onclick={() => (open = false)}>Close</button>
+    </div>
+  </Modal>
+{/if}
 
 <style>
   .strip {
-    background: var(--felt);
-    border-radius: var(--r-card);
-    box-shadow: var(--hairline-dim), var(--shadow);
-    padding: var(--sp-2) var(--sp-3);
     display: flex;
     flex-direction: column;
     gap: var(--sp-1);
-    min-width: 150px;
+    align-items: stretch;
+    border: 1px solid var(--line);
+    padding: var(--sp-2);
+    cursor: pointer;
+    text-align: left;
+    min-width: 118px;
   }
 
-  .strip.active {
-    box-shadow: var(--hairline), var(--shadow);
-    background: var(--felt-hi);
+  .strip.acting {
+    border-color: var(--rubric);
+    box-shadow:
+      inset 0 0 0 1px var(--rubric),
+      var(--shadow);
   }
 
   .who {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
     gap: var(--sp-2);
+    justify-content: space-between;
   }
 
   .name {
-    font-weight: 600;
+    font-family: var(--font-ui);
+    font-weight: 700;
+    font-size: var(--fs-xs);
     letter-spacing: 0.04em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .score {
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: var(--fs-lg);
-    line-height: 1;
+  .turn-mark {
+    font-family: var(--font-ui);
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    flex: none;
   }
 
-  .row {
+  .purse-line {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-1);
+    gap: var(--sp-2);
     align-items: center;
-    min-height: 18px;
   }
 
-  .mini {
+  .stat {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
+    font-family: var(--font-ui);
+    font-weight: 700;
     font-size: var(--fs-xs);
   }
 
-  .card-pip {
-    background: color-mix(in srgb, var(--ivory) 12%, transparent);
-    border-radius: var(--r-chip);
-    padding: 1px 4px;
+  .score {
+    margin-left: auto;
+    font-size: var(--fs-sm);
   }
 
-  .mini-back {
-    display: inline-block;
-    width: 11px;
-    height: 15px;
+  .thumb {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    width: 90px;
+    align-self: center;
+  }
+
+  .thumb-cell {
+    position: relative;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    background: var(--parchment-deep);
     border-radius: 2px;
-    background: var(--lacquer);
-    box-shadow: inset 0 0 0 1px var(--gold-lo);
-    margin-left: 2px;
   }
 
-  .noble {
-    color: var(--gold-hi);
+  .thumb-cell.castle {
+    background: color-mix(in srgb, var(--castle) 30%, var(--panel));
+  }
+
+  .thumb-cell.village {
+    background: color-mix(in srgb, var(--village) 30%, var(--panel));
+  }
+
+  .thumb-cell.facedown {
+    background: var(--parchment-deep);
+  }
+
+  .thumb-cell svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .thumb-line {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+
+  .hatch {
+    fill: none;
+    stroke: var(--ink-soft);
+    stroke-width: 1;
+  }
+
+  .thumb-shields {
+    position: relative;
+    display: flex;
+    gap: 1px;
+  }
+
+  .inspect {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    min-width: min(84vw, 300px);
+  }
+
+  .inspect-title {
+    font-size: var(--fs-lg);
+  }
+
+  .inspect-stats {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-family: var(--font-ui);
+    font-weight: 700;
+  }
+
+  .empty-prose {
+    margin: 0;
+    font-style: italic;
+    color: var(--ink-soft);
   }
 </style>

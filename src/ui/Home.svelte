@@ -1,5 +1,6 @@
 <script lang="ts">
   import RulesLeaflet from './RulesLeaflet.svelte'
+  import { wobblyLine } from './wobble'
 
   interface Props {
     onHotseat: (playerCount: 2 | 3 | 4, names: string[]) => void
@@ -15,19 +16,28 @@
   let rulesOpen = $state(false)
 
   const online = $derived(onCreateRoom !== undefined && onJoinRoom !== undefined)
+
+  const ruleTop = wobblyLine(4, 6, 336, 6, 1.6, 4)
+  const ruleBottom = wobblyLine(4, 6, 336, 6, 1.6, 3)
 </script>
 
 <main class="home">
   <header class="marquee">
-    <span class="rule" aria-hidden="true"></span>
-    <h1 class="foil-text">Castle Combo</h1>
-    <span class="rule" aria-hidden="true"></span>
-    <p class="label">Gems · Cards · Nobles</p>
+    <svg class="rule" viewBox="0 0 340 12" aria-hidden="true">
+      <path d={ruleTop} class="rule-ink" />
+      <path d="M170 1.5 L175 6 L170 10.5 L165 6 Z" class="rule-gem" />
+    </svg>
+    <h1>Castle Combo</h1>
+    <svg class="rule" viewBox="0 0 340 12" aria-hidden="true">
+      <path d={ruleBottom} class="rule-ink" />
+      <path d="M170 1.5 L175 6 L170 10.5 L165 6 Z" class="rule-gem" />
+    </svg>
+    <p class="flavor">Build your kingdom, nine cards square.</p>
     <button class="btn btn--quiet" onclick={() => (rulesOpen = true)}>How to play</button>
   </header>
 
   <div class="panels">
-    <section class="card">
+    <section class="card panel">
       <h2>At one table</h2>
       <p class="hint">Pass one device around.</p>
 
@@ -57,7 +67,7 @@
       </button>
     </section>
 
-    <section class="card">
+    <section class="card panel">
       <h2>Across the world</h2>
       <p class="hint">
         {#if online}
@@ -116,29 +126,34 @@
 
   .marquee h1 {
     font-size: clamp(3rem, 10vw, 4.8rem);
-    letter-spacing: 0.1em;
+    letter-spacing: 0.02em;
     line-height: 1;
   }
 
   .rule {
     width: min(70vw, 340px);
-    height: 8px;
-    background:
-      linear-gradient(to right, transparent, var(--gold) 20%, var(--gold) 80%, transparent) center /
-      100% 1.5px no-repeat;
-    position: relative;
+    height: 12px;
   }
 
-  .rule::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    translate: -50% -50%;
-    width: 9px;
-    height: 15px;
-    background: var(--gold);
-    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  .rule-ink {
+    fill: none;
+    stroke: var(--ink-soft);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  .rule-gem {
+    fill: var(--gold-leaf);
+    stroke: var(--ink);
+    stroke-width: 1;
+    stroke-linejoin: round;
+  }
+
+  .flavor {
+    margin: 0;
+    font-style: italic;
+    color: var(--ink-soft);
+    font-size: var(--fs-md);
   }
 
   .panels {
@@ -150,9 +165,6 @@
   }
 
   .card {
-    background: var(--felt);
-    border-radius: var(--r-card);
-    box-shadow: var(--hairline-dim), var(--shadow);
     padding: var(--sp-5);
     display: flex;
     flex-direction: column;
@@ -161,13 +173,12 @@
 
   h2 {
     font-size: var(--fs-lg);
-    letter-spacing: 0.04em;
   }
 
   .hint {
     margin: 0;
     font-size: var(--fs-sm);
-    color: color-mix(in srgb, var(--ivory) 70%, transparent);
+    color: var(--ink-soft);
   }
 
   .stepper {
@@ -184,26 +195,6 @@
   .names {
     display: grid;
     gap: var(--sp-2);
-  }
-
-  input {
-    font: inherit;
-    color: var(--ivory);
-    background: color-mix(in srgb, var(--lacquer) 60%, transparent);
-    border: none;
-    border-radius: var(--r-chip);
-    box-shadow: var(--hairline-dim);
-    padding: 11px 14px;
-    min-height: 44px;
-  }
-
-  input::placeholder {
-    color: color-mix(in srgb, var(--ivory) 40%, transparent);
-  }
-
-  input:focus-visible {
-    outline: 2px solid var(--gold);
-    outline-offset: 2px;
   }
 
   .join {

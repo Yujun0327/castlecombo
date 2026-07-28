@@ -1,51 +1,91 @@
 <script lang="ts">
-  import { CARDS, NOBLES } from '../data'
-  import { TOKEN_COLORS } from '../engine'
-  import type { Tier } from '../engine'
+  import { cardsOfDeck } from '../data'
+  import { DECKS, SHIELDS } from '../engine'
   import CardBack from './CardBack.svelte'
   import CardFace from './CardFace.svelte'
-  import NobleTile from './NobleTile.svelte'
-  import TokenChip from './TokenChip.svelte'
-
-  const tiers: Tier[] = [1, 2, 3]
+  import CoinIcon from './CoinIcon.svelte'
+  import KeyIcon from './KeyIcon.svelte'
+  import MessengerPawn from './MessengerPawn.svelte'
+  import MyGrid from './MyGrid.svelte'
+  import ScoreSheet from './ScoreSheet.svelte'
+  import ShieldIcon from './ShieldIcon.svelte'
+  import {
+    finishedBreakdown,
+    finishedPlayer,
+    midGamePlaced,
+    midGameTargets,
+  } from './gallery-fixtures'
 </script>
 
-<!-- Dev-only visual QA: every token, noble, back, and all 90 card faces. -->
+<!-- Dev-only visual QA: every icon, both backs, all 78 entries, grid fixtures. -->
 <main class="gallery">
-  <h1 class="foil-text">Component Gallery</h1>
+  <h1>Component Gallery</h1>
 
-  <section>
-    <h2 class="label">Tokens</h2>
+  <section class="panel">
+    <h2 class="label">Heraldic shields</h2>
     <div class="row">
-      {#each TOKEN_COLORS as c (c)}
-        <TokenChip kind={c} count={7} size={56} />
-      {/each}
-      {#each TOKEN_COLORS as c (c)}
-        <TokenChip kind={c} size={40} />
-      {/each}
-    </div>
-  </section>
-
-  <section>
-    <h2 class="label">Nobles</h2>
-    <div class="nobles">
-      {#each NOBLES as noble (noble.id)}
-        <NobleTile {noble} />
+      {#each SHIELDS as s (s)}
+        <div class="swatch">
+          <ShieldIcon type={s} size={44} />
+          <span class="label">{s}</span>
+        </div>
       {/each}
     </div>
   </section>
 
-  {#each tiers as tier (tier)}
-    <section>
-      <h2 class="label">Tier {tier}</h2>
+  <section class="panel">
+    <h2 class="label">Coins, keys, the messenger</h2>
+    <div class="row">
+      <CoinIcon size={44} value={7} />
+      <CoinIcon size={30} value={0} />
+      <CoinIcon size={30} />
+      <KeyIcon size={44} />
+      <KeyIcon size={26} />
+      <MessengerPawn size={40} />
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 class="label">Card backs</h2>
+    <div class="row">
+      {#each DECKS as deck (deck)}
+        <CardBack {deck} count={36} width={120} />
+        <CardBack {deck} width={90} />
+      {/each}
+    </div>
+  </section>
+
+  {#each DECKS as deck (deck)}
+    <section class="panel">
+      <h2 class="label">{deck} deck — {cardsOfDeck(deck).length} entries</h2>
       <div class="cards">
-        <CardBack {tier} />
-        {#each CARDS.filter((c) => c.tier === tier) as card (card.id)}
-          <CardFace {card} />
+        {#each cardsOfDeck(deck) as card (card.id)}
+          <CardFace def={card} width={160} />
         {/each}
       </div>
     </section>
   {/each}
+
+  <section class="panel">
+    <h2 class="label">Kingdom, five turns in</h2>
+    <MyGrid placed={midGamePlaced} />
+  </section>
+
+  <section class="panel">
+    <h2 class="label">Kingdom during placement (legal targets washed gold)</h2>
+    <MyGrid placed={midGamePlaced} targets={midGameTargets} onPlace={() => {}} />
+  </section>
+
+  <section class="panel">
+    <h2 class="label">Score sheet, finished kingdom</h2>
+    <div class="sheet-well">
+      <ScoreSheet
+        name="Fixture"
+        breakdown={finishedBreakdown}
+        faceDown={finishedPlayer.placed.map((p) => p.faceDown)}
+      />
+    </div>
+  </section>
 </main>
 
 <style>
@@ -60,13 +100,9 @@
 
   h1 {
     font-size: var(--fs-2xl);
-    letter-spacing: 0.06em;
   }
 
   section {
-    background: var(--felt);
-    border-radius: var(--r-card);
-    box-shadow: var(--hairline-dim), var(--shadow);
     padding: var(--sp-5);
     display: flex;
     flex-direction: column;
@@ -80,15 +116,20 @@
     align-items: center;
   }
 
-  .nobles {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: var(--sp-4);
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-1);
   }
 
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fill, 160px);
     gap: var(--sp-4);
+  }
+
+  .sheet-well {
+    max-width: 420px;
   }
 </style>

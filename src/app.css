@@ -1,58 +1,64 @@
 /* ------------------------------------------------------------------ */
-/* Splendor — "art-deco jewel house" design tokens                     */
-/* Surfaces are flat lacquer/felt/ivory with grain; gradients exist    */
-/* only inside gold foil and gem facets. 1.5px gold is the one         */
-/* ornament line weight. Radii: 2px chips/buttons, 6px cards.          */
+/* Castle Combo — "The Illuminated Manuscript" design tokens           */
+/* Parchment surfaces, iron-gall ink line work, gold leaf laid on in   */
+/* small patches, heraldic marginalia. One radius (4px), one shadow,   */
+/* three faces: Grenze Gotisch / EB Garamond / Alegreya Sans SC.       */
 /* ------------------------------------------------------------------ */
 
 :root {
   /* surfaces */
-  --lacquer: #14110c; /* blackened walnut — page ground */
-  --felt: #0f2c23; /* deep viridian — table surface */
-  --felt-hi: #17402f;
-  --ivory: #f2e9d5; /* card faces, dialogs — never pure white */
-  --ivory-lo: #e0d3b8;
-  --ink: #241d14;
-  --ink-soft: #4a4032;
+  --parchment: #efe4c9; /* page background */
+  --panel: #f6edd6; /* cards, sheets, modals */
+  --parchment-deep: #e3d5b2; /* wells, empty grid cells, insets */
+  --ink: #3b2f1e; /* text, line work (iron-gall brown-black) */
+  --ink-soft: rgb(59 47 30 / 0.62); /* secondary text */
+  --line: rgb(59 47 30 / 0.26); /* hairlines, ruled lines, cell outlines */
+  --gold-leaf: #c29832; /* the ONE accent */
+  --rubric: #9e3b23; /* rubricated emphasis */
 
-  /* the only accent metal */
-  --gold: #c9a227;
-  --gold-hi: #eed688;
-  --gold-lo: #8a6c14;
-  --silver: #b9bcc4; /* onyx rims only */
+  /* the two deck frame triads */
+  --castle: #7e8595;
+  --castle-hi: #99a0ae;
+  --castle-lo: #636a79;
+  --village: #8a6748;
+  --village-hi: #a17e5c;
+  --village-lo: #6e4f35;
 
-  /* gems: base / highlight / shadow */
-  --diamond: #e9f1f2;
-  --diamond-hi: #ffffff;
-  --diamond-lo: #9fb4bc;
-  --sapphire: #2456a6;
-  --sapphire-hi: #6b98de;
-  --sapphire-lo: #14315f;
-  --emerald: #1e7a4e;
-  --emerald-hi: #54b183;
-  --emerald-lo: #0e4a2d;
-  --ruby: #b3262e;
-  --ruby-hi: #e0625f;
-  --ruby-lo: #6e1116;
-  --onyx: #26222b;
-  --onyx-hi: #4e4757;
-  --onyx-lo: #121016;
+  /* the six heraldic shield triads */
+  --noble: #5f87a8;
+  --noble-hi: #7ba0be;
+  --noble-lo: #48708e;
+  --faith: #7e5a78;
+  --faith-hi: #987291;
+  --faith-lo: #64465f;
+  --scholar: #5c7a4a;
+  --scholar-hi: #749260;
+  --scholar-lo: #465f38;
+  --crafts: #b97b3f;
+  --crafts-hi: #ce9459;
+  --crafts-lo: #9a6230;
+  --peasant: #c9a94e;
+  --peasant-hi: #dbbf6b;
+  --peasant-lo: #a8893b;
+  --military: #a9553f;
+  --military-hi: #c06e56;
+  --military-lo: #87422f;
 
-  /* type */
-  --font-display: 'Cormorant Garamond', 'Times New Roman', serif;
-  --font-engraved: 'Marcellus', 'Times New Roman', serif;
-  --font-ui: 'Jost', 'Avenir Next', 'Futura', sans-serif;
+  /* type roles */
+  --font-display: 'Grenze Gotisch Variable', 'Times New Roman', serif;
+  --font-body: 'EB Garamond', Georgia, serif;
+  --font-ui: 'Alegreya Sans SC', 'Avenir Next', sans-serif;
 
   /* modular scale, ratio 1.25, base 16 */
-  --fs-xs: 0.8rem; /* 12.8 */
-  --fs-sm: 1rem; /* 16 */
-  --fs-md: 1.25rem; /* 20 */
-  --fs-lg: 1.563rem; /* 25 */
-  --fs-xl: 1.953rem; /* 31.25 */
-  --fs-2xl: 2.441rem; /* 39 */
-  --fs-3xl: 3.052rem; /* 49 */
+  --fs-xs: 0.8rem;
+  --fs-sm: 1rem;
+  --fs-md: 1.25rem;
+  --fs-lg: 1.563rem;
+  --fs-xl: 1.953rem;
+  --fs-2xl: 2.441rem;
+  --fs-3xl: 3.052rem;
 
-  /* spacing */
+  /* spacing scale */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -61,20 +67,15 @@
   --sp-6: 32px;
   --sp-7: 48px;
 
-  /* shape */
-  --r-chip: 2px;
-  --r-card: 6px;
+  /* shape: manuscript pages are nearly square-cut — ONE radius */
+  --radius: 4px;
 
-  /* elevation: ONE low shadow; frames get an inset gold hairline */
-  --shadow: 0 2px 8px rgb(0 0 0 / 0.45);
-  --hairline: inset 0 0 0 1.5px var(--gold);
-  --hairline-dim: inset 0 0 0 1px color-mix(in srgb, var(--gold) 45%, transparent);
+  /* elevation: single soft umbra + ink hairline; never glows */
+  --shadow: 0 2px 6px rgb(59 47 30 / 0.18);
+  --hairline: inset 0 0 0 1px var(--line);
 
-  /* foil: the only gradient allowed on chrome */
-  --foil: linear-gradient(105deg, var(--gold-lo) 0%, var(--gold-hi) 45%, var(--gold) 60%, var(--gold-lo) 100%);
-
-  /* paper grain: feTurbulence baked to a tiling data-URI, overlaid at low opacity */
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.47 0 0 0 0 0.42 0 0 0 0.5 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
+  /* parchment grain: feTurbulence baked to a tiling data-URI */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.36 0 0 0 0 0.30 0 0 0 0 0.19 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
 }
 
 *,
@@ -91,9 +92,9 @@ body {
 }
 
 body {
-  background: var(--lacquer);
-  color: var(--ivory);
-  font-family: var(--font-ui);
+  background: var(--parchment);
+  color: var(--ink);
+  font-family: var(--font-body);
   font-size: var(--fs-sm);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -103,31 +104,27 @@ body {
 #app {
   min-height: 100dvh;
   position: relative;
+  isolation: isolate;
 }
 
-/* page-wide grain wash over the lacquer */
+/* page-wide grain wash over the parchment, painted under everything */
 #app::before {
   content: '';
   position: fixed;
   inset: 0;
   background-image: var(--grain);
-  opacity: 0.05;
+  opacity: 0.07;
   pointer-events: none;
-  z-index: 0;
-}
-
-#app > * {
-  position: relative;
-  z-index: 1;
+  z-index: -1;
 }
 
 h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  font-weight: 700;
+  font-weight: 500;
   margin: 0;
-  color: var(--ivory);
+  color: var(--ink);
 }
 
 button {
@@ -140,22 +137,26 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-/* letter-spaced small-caps label — the house label style */
+/* small-caps UI label — the house label style (Alegreya Sans SC) */
 .label {
   font-family: var(--font-ui);
   font-size: var(--fs-xs);
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: color-mix(in srgb, var(--ivory) 72%, transparent);
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
 }
 
-/* gold foil text (display numerals, titles) */
-.foil-text {
-  background: var(--foil);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+/* gold-leaf numeral: gold fill with an ink edge, for score totals */
+.gilt {
+  color: var(--gold-leaf);
+  text-shadow:
+    0 0 0.5px var(--ink),
+    0 0.5px 0.5px rgb(59 47 30 / 0.45);
+}
+
+/* rubricated emphasis */
+.rubric {
+  color: var(--rubric);
 }
 
 /* ------------------------------------------------------------------ */
@@ -164,23 +165,25 @@ button {
 
 .btn {
   font-family: var(--font-ui);
-  font-weight: 600;
+  font-weight: 700;
   font-size: var(--fs-sm);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ivory);
-  background: var(--felt);
-  border: none;
-  border-radius: var(--r-chip);
-  box-shadow: var(--hairline-dim), var(--shadow);
-  padding: 12px 24px;
+  letter-spacing: 0.05em;
+  color: var(--ink);
+  background: var(--parchment-deep);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 10px 22px;
   min-height: 44px;
-  transition: box-shadow 120ms ease, transform 120ms ease, background 120ms ease;
+  transition:
+    background 120ms ease,
+    transform 120ms ease,
+    border-color 120ms ease;
 }
 
 .btn:hover {
-  background: var(--felt-hi);
-  box-shadow: var(--hairline), var(--shadow);
+  background: var(--panel);
+  border-color: var(--ink-soft);
 }
 
 .btn:active {
@@ -194,41 +197,42 @@ button {
 }
 
 .btn--gold {
-  color: var(--lacquer);
-  background: var(--gold);
-  box-shadow: inset 0 0 0 1.5px var(--gold-lo), var(--shadow);
+  background: var(--gold-leaf);
+  border-color: var(--ink);
+  color: var(--ink);
 }
 
 .btn--gold:hover {
-  background: var(--gold-hi);
-  box-shadow: inset 0 0 0 1.5px var(--gold-lo), var(--shadow);
+  background: color-mix(in srgb, var(--gold-leaf) 82%, var(--panel));
+  border-color: var(--ink);
 }
 
 .btn--quiet {
   background: transparent;
-  box-shadow: var(--hairline-dim);
+  box-shadow: none;
+  border-color: transparent;
 }
 
 .btn--quiet:hover {
-  background: rgb(255 255 255 / 0.04);
-  box-shadow: var(--hairline);
+  background: rgb(59 47 30 / 0.06);
+  border-color: var(--line);
 }
 
-/* custom gold focus ring — never the default blue, never removed */
+/* gold focus ring — never the default blue, never removed */
 :focus-visible {
-  outline: 2px solid var(--gold);
+  outline: 2px solid var(--gold-leaf);
   outline-offset: 2px;
 }
 
 /* ------------------------------------------------------------------ */
-/* ivory panel (dialogs, cards-as-surfaces)                            */
+/* panel — a leaf of the manuscript                                    */
 /* ------------------------------------------------------------------ */
 
 .panel {
-  background: var(--ivory);
+  background: var(--panel);
   color: var(--ink);
-  border-radius: var(--r-card);
-  box-shadow: var(--hairline-dim), var(--shadow);
+  border-radius: var(--radius);
+  box-shadow: var(--hairline), var(--shadow);
   position: relative;
 }
 
@@ -242,18 +246,20 @@ button {
   pointer-events: none;
 }
 
-/* deco chamfered corners for card-shaped elements */
-.chamfer {
-  clip-path: polygon(
-    8px 0,
-    calc(100% - 8px) 0,
-    100% 8px,
-    100% calc(100% - 8px),
-    calc(100% - 8px) 100%,
-    8px 100%,
-    0 calc(100% - 8px),
-    0 8px
-  );
+/* inputs share the manuscript look */
+input[type='text'] {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  min-height: 44px;
+}
+
+input[type='text']::placeholder {
+  color: var(--ink-soft);
+  font-style: italic;
 }
 
 @media (prefers-reduced-motion: reduce) {

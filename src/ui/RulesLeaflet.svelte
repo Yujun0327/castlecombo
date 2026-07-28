@@ -1,78 +1,81 @@
 <script lang="ts">
-  import { GEMS } from '../engine'
-  import GemIcon from './GemIcon.svelte'
   import Modal from './Modal.svelte'
 
   interface Props {
     onClose: () => void
   }
 
-  let { onClose }: Props = $props()
+  const { onClose }: Props = $props()
 </script>
 
 <Modal {onClose}>
   <article class="leaflet">
-    <header>
-      <h2 class="foil-text">How to play</h2>
-      <p class="hint">You are Renaissance merchants racing to build the most prestigious jewel house.</p>
-    </header>
+    <h2>How the kingdom is built</h2>
 
     <section>
-      <h3 class="label">The goal</h3>
-      <p><strong>15 prestige points</strong> triggers the final round. Points come from purchased cards and visiting nobles.</p>
-    </section>
-
-    <section>
-      <h3 class="label">Your turn — exactly one action</h3>
-      <ol>
-        <li>
-          <strong>Take 3 gems</strong> of different colors from the bank
-          <span class="gems">{#each GEMS.slice(0, 3) as g (g)}<GemIcon kind={g} size={14} />{/each}</span>
-          — or <strong>take 2 of one color</strong>, allowed only if that stack has 4 or more.
-          If fewer colors remain, take as many different ones as you can.
-        </li>
-        <li>
-          <strong>Reserve a card</strong> — any face-up card, or the top of a deck sight-unseen.
-          You also take 1 gold <GemIcon kind="gold" size={14} /> if any is left. Reserved cards are
-          yours alone to buy later; you may hold at most <strong>3</strong>.
-        </li>
-        <li>
-          <strong>Purchase a card</strong> — from the market or your own reserve. Pay its gem cost;
-          <strong>gold stands in for any color</strong>. Your purchased cards give permanent
-          discounts: each card's gem reduces matching costs by 1 forever.
-        </li>
-      </ol>
-    </section>
-
-    <section>
-      <h3 class="label">The limit</h3>
-      <p>You may hold at most <strong>10 tokens</strong> at the end of your turn — return any excess (gold included, your choice which).</p>
-    </section>
-
-    <section>
-      <h3 class="label">Nobles</h3>
-      <p>
-        Nobles visit <em>automatically</em> at the end of your turn once your card discounts meet
-        their requirement — they cost nothing and are worth <strong>3 prestige</strong>. One visit
-        per turn at most; if several qualify at once, you choose.
+      <h3>The turn</h3>
+      <p class="dropcap">
+        Each turn you take exactly one card from the row the messenger stands beside. Before
+        taking, you may spend one key to either move the messenger to the other row, or discard
+        the whole row and reveal three fresh cards. Then buy a card and place it in your kingdom,
+        or take it face-down instead.
       </p>
     </section>
 
     <section>
-      <h3 class="label">Game end</h3>
-      <p>
-        When anyone ends their turn with 15+ prestige, the round is finished so everyone has played
-        an equal number of turns. Highest prestige wins; ties go to whoever bought
-        <strong>fewer</strong> cards. Still tied — the victory is shared.
+      <h3>Keys</h3>
+      <p class="dropcap">
+        Keys are spent to move the messenger or redraw a row — at most one key per turn. Every
+        key still in hand at the end of the chronicle is worth one point.
       </p>
     </section>
 
-    <p class="hint fine">
-      Setup scales automatically: gem stacks of 4 / 5 / 7 for 2 / 3 / 4 players, 5 gold, and one
-      more noble than there are players.
-    </p>
+    <section>
+      <h3>Taking face-down</h3>
+      <p class="dropcap">
+        Instead of paying for a card, lay it face-down in your kingdom and take 6 gold and 2 keys
+        from the supply. A face-down card fills its cell but has no shields, no effect, and scores
+        nothing. If the card bears a messenger icon, the messenger still moves.
+      </p>
+    </section>
 
-    <button class="btn btn--gold" onclick={onClose}>To the table</button>
+    <section>
+      <h3>Banners</h3>
+      <p class="dropcap">
+        A &minus;1 banner discounts every later purchase of its scope — all cards, or only castle,
+        or only village — by one gold, down to a floor of zero. Banners stack; a banner never
+        discounts its own purchase.
+      </p>
+    </section>
+
+    <section>
+      <h3>Purses</h3>
+      <p class="dropcap">
+        Some cards carry a drawstring purse. Effects may lock gold onto them during play; that
+        gold cannot be spent. When the game ends, your loose gold climbs onto your purses with
+        room, best purse first, and scores as the purse's scroll says.
+      </p>
+    </section>
+
+    <section>
+      <h3>The kingdom</h3>
+      <p class="dropcap">
+        Your kingdom must always fit inside three cards by three. After the first card, every card
+        must touch one already placed, side to side. Nine turns each — a finished kingdom is the
+        full square.
+      </p>
+    </section>
+
+    <section>
+      <h3>Scoring &amp; ties</h3>
+      <p class="dropcap">
+        Every face-up card scores its scroll: rows and columns count on the finished square. Add
+        one point per leftover key. The highest total prevails; ties fall to whoever kept the most
+        gold that found no purse, and then the triumph is shared.
+      </p>
+    </section>
+
+    <button class="btn btn--gold" onclick={onClose}>Back to the table</button>
   </article>
 </Modal>
 
@@ -81,62 +84,33 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-4);
-    max-width: 520px;
+    max-width: 60ch;
   }
 
   h2 {
     font-size: var(--fs-xl);
-    letter-spacing: 0.05em;
   }
 
   h3 {
+    font-size: var(--fs-md);
     margin-bottom: var(--sp-1);
   }
 
-  p,
-  li {
+  p {
     margin: 0;
     font-size: var(--fs-sm);
     line-height: 1.55;
   }
 
-  ol {
-    margin: 0;
-    padding-left: 1.2em;
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-2);
-  }
-
-  li::marker {
-    color: var(--gold);
-    font-family: var(--font-engraved);
-  }
-
-  strong {
-    color: var(--gold-hi);
-    font-weight: 600;
-  }
-
-  .gems {
-    display: inline-flex;
-    gap: 2px;
-    vertical-align: -2px;
-  }
-
-  .leaflet :global(.gem) {
-    display: inline-block;
-    vertical-align: -2px;
-  }
-
-  .hint {
-    color: color-mix(in srgb, var(--ivory) 70%, transparent);
-  }
-
-  .fine {
-    font-size: var(--fs-xs);
-    border-top: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
-    padding-top: var(--sp-3);
+  /* rubricated drop caps open each section */
+  .dropcap::first-letter {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 2.6em;
+    line-height: 0.8;
+    color: var(--rubric);
+    float: left;
+    padding: 0.06em 0.12em 0 0;
   }
 
   .btn {

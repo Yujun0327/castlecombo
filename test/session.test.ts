@@ -4,8 +4,18 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { OnlineSession } from '../src/app/session.svelte'
 import { KINGDOM_CARDS, mulberry32, publicHash } from '../src/engine'
 import type { Move } from '../src/engine'
+import GameScreen from '../src/ui/GameScreen.svelte'
 import { Mesh } from './mesh'
 import PlayingProbe from './support/PlayingProbe.svelte'
+
+// jsdom has no ResizeObserver; bind:clientWidth needs a quiet stand-in
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+}
 
 // jsdom has no Web Animations API; Svelte transitions need a finishing stub
 if (!Element.prototype.animate) {
@@ -252,11 +262,108 @@ describe('play across the mesh', () => {
 })
 
 describe('online play through the rendered UI (M4)', () => {
-  // GameScreen is still the splendor board; these come back once the Castle
-  // Combo table lands in M4.
-  it.todo('lets the acting player buy a card via clicks and syncs it to the peer')
-  it.todo('lets the acting player spend a key (switch/refresh) via clicks')
-  it.todo('tells the waiting player why the card actions are unavailable')
+  function mountScreen(session: OnlineSession) {
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    const instance = mount(GameScreen, {
+      target,
+      props: { session, onExit: () => {}, onRematch: () => {} },
+    })
+    flushSync()
+    return {
+      target,
+      cleanup: () => {
+        unmount(instance)
+        target.remove()
+      },
+    }
+  }
+
+  function click(el: Element | null | undefined) {
+    expect(el, 'expected element to click').toBeTruthy()
+    ;(el as HTMLElement).click()
+    flushSync()
+  }
+
+  const byText = (root: ParentNode, text: string) =>
+    [...root.querySelectorAll('button')].find((b) => b.textContent!.includes(text))
+
+  it('lets the acting player buy a card via clicks and syncs it to the peer', () => {
+    const mesh = new Mesh()
+    const sessions = startGame(mesh, 2)
+    const acting = sessions.find((s) => s.myTurn)!
+    const peer = sessions.find((s) => !s.myTurn)!
+    const { target, cleanup } = mountScreen(acting)
+
+    // tap the first entry of the messenger's row → the sheet opens
+    const deck = acting.state.messenger
+    click(target.querySelector(`button[aria-label^="${deck} slot 1:"]`))
+
+    // satisfy any printed decisions the entry demands, then recruit
+    const choice = target.querySelector('.choice-option')
+    if (choice) click(choice)
+    const discard = target.querySelector('.discard-option')
+    if (discard) click(discard)
+    const recruit = byText(target, 'Recruit') as HTMLButtonElement
+    expect(recruit.disabled).toBe(false) // 15 starting gold covers any cost
+    click(recruit)
+
+    // first placement: the origin cell is washed gold — tap and confirm
+    click(target.querySelector('button[aria-label="place at 0, 0"]'))
+    click(byText(target, 'Place here'))
+    mesh.flush()
+
+    expect(acting.state.players[acting.seat!].placed.length).toBe(1)
+    expect(acting.state.players[acting.seat!].placed[0].faceDown).toBe(false)
+    expect(publicHash(peer.state)).toBe(publicHash(acting.state))
+    cleanup()
+  })
+
+  it('lets the acting player spend a key (switch/refresh) via clicks', () => {
+    const mesh = new Mesh()
+    const sessions = startGame(mesh, 2)
+    const acting = sessions.find((s) => s.myTurn)!
+    const peer = sessions.find((s) => !s.myTurn)!
+    const { target, cleanup } = mountScreen(acting)
+
+    const seal = target.querySelector('[aria-label="move the messenger"]') as HTMLButtonElement
+    expect(seal.disabled).toBe(false)
+    const before = acting.state.messenger
+    click(seal)
+    mesh.flush()
+
+    expect(acting.state.messenger).not.toBe(before)
+    expect(acting.state.keyUsedThisTurn).toBe(true)
+    expect(publicHash(peer.state)).toBe(publicHash(acting.state))
+
+    // one key per turn: both seals go dead, exactly like myMoves() says
+    expect(acting.myMoves().some((m) => m.type === 'useKey')).toBe(false)
+    expect(
+      (target.querySelector('[aria-label="redraw the row"]') as HTMLButtonElement).disabled,
+    ).toBe(true)
+    cleanup()
+  })
+
+  it('tells the waiting player why the card actions are unavailable', () => {
+    const mesh = new Mesh()
+    const sessions = startGame(mesh, 2)
+    const waiting = sessions.find((s) => !s.myTurn)!
+    const actorName = waiting.names[waiting.state.turn]
+    const { target, cleanup } = mountScreen(waiting)
+
+    // every market entry is inert and the margin prose says whose turn it is
+    const slots = [...target.querySelectorAll('button[aria-label*=" slot "]')]
+    expect(slots.length).toBeGreaterThan(0)
+    expect(slots.every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
+    expect(target.textContent).toContain(`Awaiting ${actorName}`)
+    expect(target.textContent).toContain('the quill is theirs')
+
+    // the wax seals are dead too — no useKey move exists for this seat
+    expect(
+      (target.querySelector('[aria-label="move the messenger"]') as HTMLButtonElement).disabled,
+    ).toBe(true)
+    cleanup()
+  })
 })
 
 describe('reconnect and spectators', () => {

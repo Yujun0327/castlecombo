@@ -44,12 +44,12 @@
 </script>
 
 <main class="lobby">
-  <section class="card">
+  <section class="card panel">
     <h1>The table is set</h1>
 
     <div class="code-row">
       <span class="label">Room</span>
-      <span class="code foil-text">{session.room}</span>
+      <span class="code gilt">{session.room}</span>
       <button class="btn btn--quiet" onclick={copyInvite}>{copied ? 'Copied' : 'Copy invite'}</button>
     </div>
 
@@ -135,9 +135,6 @@
   }
 
   .card {
-    background: var(--felt);
-    border-radius: var(--r-card);
-    box-shadow: var(--hairline-dim), var(--shadow);
     padding: var(--sp-6);
     display: flex;
     flex-direction: column;
@@ -147,7 +144,6 @@
 
   h1 {
     font-size: var(--fs-xl);
-    letter-spacing: 0.04em;
   }
 
   .code-row {
@@ -158,9 +154,9 @@
   }
 
   .code {
-    font-family: var(--font-engraved);
+    font-family: var(--font-display);
     font-size: var(--fs-xl);
-    letter-spacing: 0.22em;
+    letter-spacing: 0.18em;
   }
 
   .seats {
@@ -176,28 +172,29 @@
     display: flex;
     align-items: center;
     gap: var(--sp-3);
-    background: color-mix(in srgb, var(--lacquer) 45%, transparent);
-    border-radius: var(--r-chip);
-    box-shadow: var(--hairline-dim);
+    background: var(--parchment-deep);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
     padding: var(--sp-2) var(--sp-3);
     min-height: 48px;
   }
 
   .seat.open {
-    opacity: 0.55;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 30%, transparent);
+    opacity: 0.6;
+    background: transparent;
+    border-style: dashed;
   }
 
   .dot {
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: color-mix(in srgb, var(--ivory) 25%, transparent);
+    background: var(--line);
     flex: none;
   }
 
   .dot.on {
-    background: var(--emerald-hi);
+    background: var(--scholar);
   }
 
   .name {
@@ -208,34 +205,37 @@
   .name.empty {
     font-weight: 400;
     font-style: italic;
+    color: var(--ink-soft);
   }
 
   .name-input {
     font: inherit;
     font-weight: 600;
-    color: var(--ivory);
+    color: var(--ink);
     background: transparent;
     border: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+    border-bottom: 1px solid var(--line);
     flex: 1;
     min-width: 0;
     padding: 2px 0;
+    min-height: 0;
+    border-radius: 0;
   }
 
   .name-input:focus-visible {
     outline: none;
-    border-bottom-color: var(--gold);
+    border-bottom-color: var(--gold-leaf);
   }
 
   .ready {
+    font-family: var(--font-ui);
     font-size: var(--fs-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: color-mix(in srgb, var(--ivory) 50%, transparent);
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
   }
 
   .ready.yes {
-    color: var(--gold-hi);
+    color: var(--rubric);
   }
 
   .actions {
@@ -247,7 +247,7 @@
   .hint {
     margin: 0;
     font-size: var(--fs-sm);
-    color: color-mix(in srgb, var(--ivory) 65%, transparent);
+    color: var(--ink-soft);
     display: flex;
     align-items: center;
     gap: var(--sp-2);

@@ -1,53 +1,77 @@
 <script lang="ts">
-  import type { Tier } from '../engine'
+  import type { Deck } from '../engine'
+  import { wobblyLine, wobblyPolygon } from './wobble'
 
   interface Props {
-    tier: Tier
+    deck: Deck
+    /** Folio count for deck stacks; omitted on a lone face-down card. */
+    count?: number
+    /** Rendering width in px, 160×224 base. */
+    width?: number
   }
 
-  let { tier }: Props = $props()
+  const { deck, count, width = 160 }: Props = $props()
 
-  const numeral = $derived(['I', 'II', 'III'][tier - 1])
+  const uid = $props.id()
+
+  const W = 160
+  const H = 224
+
+  const frame = $derived(
+    wobblyPolygon(
+      [
+        { x: 6, y: 6 },
+        { x: W - 6, y: 6 },
+        { x: W - 6, y: H - 6 },
+        { x: 6, y: H - 6 },
+      ],
+      1.8,
+      deck === 'castle' ? 301 : 302,
+    ),
+  )
+
+  // one diaper tile: two wobbled diagonals crossing a 20×20 cell
+  const diaperA = wobblyLine(0, 20, 20, 0, 0.9, 2)
+  const diaperB = wobblyLine(0, 0, 20, 20, 0.9, 2)
+
+  const gothic = $derived(width >= 120) /* back word renders ≥18px from 120px wide */
 </script>
 
-<div class="holder">
-  <div class="back chamfer">
-    <div class="keyline outer"></div>
-    {#if tier >= 2}
-      <div class="keyline inner"></div>
-    {/if}
-    {#if tier === 3}
-      <svg class="corners" viewBox="0 0 100 140" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M8,22 L20,10 M8,15 L14,9 M8,29 L26,11" />
-        <path d="M92,22 L80,10 M92,15 L86,9 M92,29 L74,11" />
-        <path d="M8,118 L20,130 M8,125 L14,131 M8,111 L26,129" />
-        <path d="M92,118 L80,130 M92,125 L86,131 M92,111 L74,129" />
-      </svg>
-    {/if}
-    <span class="numeral foil-text">{numeral}</span>
-    <div class="lozenges" aria-hidden="true">
-      {#each { length: tier } as _, i (i)}
-        <span class="lozenge"></span>
-      {/each}
-    </div>
-  </div>
+<div
+  class="back deck--{deck}"
+  style="width:{width}px; font-size:{((width / W) * 16).toFixed(2)}px"
+  role="img"
+  aria-label="{deck} card back{count !== undefined ? `, ${count} cards` : ''}"
+>
+  <svg class="art" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <pattern id="diaper-{uid}" width="20" height="20" patternUnits="userSpaceOnUse">
+        <path d={diaperA} class="diaper" />
+        <path d={diaperB} class="diaper" />
+      </pattern>
+    </defs>
+    <rect x="6" y="6" width={W - 12} height={H - 12} fill="url(#diaper-{uid})" />
+    <path d={frame} class="frame-rule" />
+  </svg>
+
+  <span class="deck-name" class:gothic>{deck}</span>
+
+  {#if count !== undefined}
+    <span class="folio tabular">{count}</span>
+  {/if}
 </div>
 
 <style>
-  .holder {
-    container-type: inline-size;
-    filter: drop-shadow(0 2px 6px rgb(0 0 0 / 0.4));
-  }
-
   .back {
-    aspect-ratio: 5 / 7;
-    background: var(--lacquer);
-    border-radius: var(--r-card);
     position: relative;
-    display: grid;
-    place-content: center;
-    justify-items: center;
-    gap: 6%;
+    aspect-ratio: 160 / 224;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
     overflow: hidden;
   }
 
@@ -55,57 +79,81 @@
     content: '';
     position: absolute;
     inset: 0;
+    border-radius: inherit;
     background-image: var(--grain);
     opacity: 0.06;
     pointer-events: none;
   }
 
-  .keyline {
-    position: absolute;
-    border: 1.5px solid var(--gold);
-    pointer-events: none;
+  .deck--castle {
+    background: color-mix(in srgb, var(--castle) 30%, var(--panel));
   }
 
-  .keyline.outer {
-    inset: 5%;
-    opacity: 0.9;
+  .deck--village {
+    background: color-mix(in srgb, var(--village) 30%, var(--panel));
   }
 
-  .keyline.inner {
-    inset: 10%;
-    opacity: 0.55;
-  }
-
-  .corners {
+  .art {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
+    pointer-events: none;
   }
 
-  .corners path {
-    stroke: var(--gold);
-    stroke-width: 1.5;
+  .deck--castle .diaper {
+    stroke: var(--castle-lo);
+  }
+
+  .deck--village .diaper {
+    stroke: var(--village-lo);
+  }
+
+  .diaper {
     fill: none;
-    opacity: 0.7;
+    stroke-width: 1;
+    opacity: 0.35;
   }
 
-  .numeral {
-    font-family: var(--font-engraved);
-    font-size: 34cqw;
-    line-height: 1;
+  .frame-rule {
+    fill: none;
+    stroke-width: 2;
+    stroke-linejoin: round;
   }
 
-  .lozenges {
-    display: flex;
-    gap: 7cqw;
+  .deck--castle .frame-rule {
+    stroke: var(--castle-lo);
   }
 
-  .lozenge {
-    width: 7cqw;
-    height: 11cqw;
-    background: var(--gold);
-    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-    opacity: 0.9;
+  .deck--village .frame-rule {
+    stroke: var(--village-lo);
+  }
+
+  .deck-name {
+    position: relative;
+    font-family: var(--font-ui);
+    font-weight: 700;
+    font-size: 0.8em;
+    letter-spacing: 0.14em;
+    color: var(--ink);
+  }
+
+  .deck-name.gothic {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 1.5em; /* ≥18px whenever shown as gothic */
+    letter-spacing: 0.04em;
+  }
+
+  .folio {
+    position: relative;
+    font-family: var(--font-ui);
+    font-weight: 700;
+    font-size: 0.85em;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.1em 0.5em;
   }
 </style>

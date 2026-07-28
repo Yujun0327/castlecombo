@@ -1,22 +1,18 @@
 <script lang="ts">
-  import { flip } from 'svelte/animate'
-  import { scale } from 'svelte/transition'
-  import { nobleById } from '../data'
-  import type { Gem, Seat } from '../engine'
+  import type { Seat } from '../engine'
   import { OnlineSession } from '../app/session.svelte'
   import type { BaseSession } from '../app/session.svelte'
+  import { scores } from '../app/session.svelte'
   import { isMuted, play, setMuted } from './audio'
-  import { dur } from './motion'
-  import type { SheetTarget } from './interact'
-  import BankRow from './BankRow.svelte'
+  import { NO_SELECTION, targetCells } from './interact'
+  import type { Selection } from './interact'
   import CardSheet from './CardSheet.svelte'
+  import CoinIcon from './CoinIcon.svelte'
+  import KeyIcon from './KeyIcon.svelte'
   import MarketBoard from './MarketBoard.svelte'
-  import MyTableau from './MyTableau.svelte'
-  import NobleChoiceDialog from './NobleChoiceDialog.svelte'
-  import NobleTile from './NobleTile.svelte'
+  import MyGrid from './MyGrid.svelte'
   import OpponentStrip from './OpponentStrip.svelte'
   import RulesLeaflet from './RulesLeaflet.svelte'
-  import TokenReturnDialog from './TokenReturnDialog.svelte'
   import VictoryOverlay from './VictoryOverlay.svelte'
 
   interface Props {
@@ -25,14 +21,15 @@
     onRematch: () => void
   }
 
-  let { session, onExit, onRematch }: Props = $props()
+  const { session, onExit, onRematch }: Props = $props()
 
-  let selection = $state<Gem[]>([])
-  let sheet = $state<SheetTarget | null>(null)
+  let sel = $state<Selection>(NO_SELECTION)
+  let pendingChoice = $state<'a' | 'b' | undefined>(undefined)
+  let pendingDiscard = $state<number | undefined>(undefined)
   let muted = $state(isMuted())
   let rulesOpen = $state(false)
 
-  // foley: play whatever the session just emitted
+  // foley: play whatever the session just emitted (seen-cursor pattern)
   let seenEvent = -1
   $effect(() => {
     const last = session.events.at(-1)
@@ -42,14 +39,20 @@
     }
   })
 
+  // a selection must not survive losing the turn (remote move landed)
+  $effect(() => {
+    if (!session.myTurn && sel.kind !== 'none') clearSelection()
+  })
+
   function toggleMute() {
     muted = !muted
     setMuted(muted)
   }
 
-  function updateSelection(next: Gem[]) {
-    if (next.length > selection.length) play('select')
-    selection = next
+  function clearSelection() {
+    sel = NO_SELECTION
+    pendingChoice = undefined
+    pendingDiscard = undefined
   }
 
   /** The seat shown as "mine" at the bottom: fixed online, the actor in hotseat. */
@@ -59,76 +62,100 @@
     return Array.from({ length: n - 1 }, (_, i) => (me + 1 + i) % n)
   })
 
-  const myPending = $derived(session.myTurn ? session.state.pending : null)
-  const passOnly = $derived.by(() => {
-    const moves = session.myMoves()
-    return moves.length === 1 && moves[0].type === 'pass' ? moves[0] : null
-  })
-
   const online = $derived(session instanceof OnlineSession ? session : null)
+  const myPlayer = $derived(session.state.players[me])
+  const myScore = $derived(scores(session.state)[me])
+
+  const moves = $derived(session.myMoves())
+  const targets = $derived(targetCells(sel, moves))
 
   const turnLine = $derived.by(() => {
-    if (session.state.result) return 'Game over'
+    if (session.state.result) return 'The chronicle is closed'
     if (session.mode === 'hotseat') return `${session.names[session.actor]} to play`
     if (online?.spectator) return `Watching — ${session.names[session.actor]} to play`
-    return session.myTurn ? 'Your turn' : `${session.names[session.actor]} is thinking…`
+    return session.myTurn ? 'Your turn' : `${session.names[session.actor]} to play`
   })
+
+  function openSheet(slot: number) {
+    sel = { kind: 'sheet', slot }
+  }
+
+  function commitSheet(commit: {
+    mode: 'buy' | 'takeFacedown'
+    slot: number
+    choice?: 'a' | 'b'
+    discardSlot?: number
+  }) {
+    pendingChoice = commit.choice
+    pendingDiscard = commit.discardSlot
+    sel = { kind: 'placing', slot: commit.slot, mode: commit.mode }
+  }
+
+  /** Dispatch the move for the confirmed cell, honoring pending decisions. */
+  function placeAt(x: number, y: number) {
+    if (sel.kind !== 'placing') return
+    const mode = sel.mode
+    const slot = sel.slot
+    const candidates = moves.filter(
+      (m) => m.type === mode && m.slot === slot && m.x === x && m.y === y,
+    )
+    const move =
+      candidates.find(
+        (m) =>
+          m.type !== 'buy' ||
+          ((pendingChoice === undefined || m.choice === pendingChoice) &&
+            (pendingDiscard === undefined || m.discardSlot === pendingDiscard)),
+      ) ?? candidates[0]
+    if (!move) return
+    clearSelection()
+    session.submit(move)
+  }
 </script>
 
 <div class="screen">
   <header class="topbar">
-    <button class="btn btn--quiet exit" onclick={onExit}>Leave</button>
-    <button class="btn btn--quiet exit" onclick={toggleMute} aria-label={muted ? 'unmute' : 'mute'}>
-      {muted ? 'Sound off' : 'Sound on'}
-    </button>
-    <button class="btn btn--quiet exit" onclick={() => (rulesOpen = true)}>Rules</button>
-    <div class="turn">
-      <span class="turnline">{turnLine}</span>
-      {#if session.state.finalRound && !session.state.result}
-        <span class="final label">Final round</span>
-      {/if}
-    </div>
-    <div class="opponents">
-      {#each others as seat (seat)}
-        <OpponentStrip {session} {seat} />
-      {/each}
+    <button class="btn btn--quiet small" onclick={onExit}>Leave</button>
+    <h1 class="turnline" class:rubric={session.myTurn && !session.state.result}>{turnLine}</h1>
+    <div class="top-actions">
+      <button class="btn btn--quiet small" onclick={toggleMute} aria-label={muted ? 'unmute' : 'mute'}>
+        {muted ? 'Sound off' : 'Sound on'}
+      </button>
+      <button class="btn btn--quiet small" onclick={() => (rulesOpen = true)}>Rules</button>
     </div>
   </header>
 
   {#if online?.status === 'desync'}
-    <div class="notice">Out of step with the table — resynchronizing…</div>
+    <div class="notice">Out of step with the table — resynchronizing&hellip;</div>
   {:else if online?.waitingOn}
-    <div class="notice">Waiting for {online.waitingOn} to reconnect…</div>
+    <div class="notice">Waiting on {online.waitingOn}&hellip; (disconnected)</div>
   {/if}
 
+  <div class="opponents">
+    {#each others as seat (seat)}
+      <OpponentStrip {session} {seat} />
+    {/each}
+  </div>
+
   <main class="table">
-    <section class="nobles" aria-label="nobles">
-      {#each session.state.nobles as id (id)}
-        <div
-          class="noble"
-          animate:flip={{ duration: dur(300) }}
-          out:scale={{ duration: dur(320), start: 1.06 }}
-        >
-          <NobleTile noble={nobleById.get(id)!} />
+    <section class="market-area panel">
+      <h2 class="area-title label">The market</h2>
+      <MarketBoard {session} onOpen={openSheet} />
+    </section>
+
+    <section class="me-area panel">
+      <h2 class="area-title label">Your kingdom</h2>
+      <MyGrid placed={myPlayer.placed} {targets} onPlace={placeAt} />
+      {#if sel.kind === 'placing'}
+        <div class="placing-bar">
+          <span class="placing-hint">Choose a gold-washed cell.</span>
+          <button class="btn btn--quiet small" onclick={clearSelection}>Put the card back</button>
         </div>
-      {/each}
-    </section>
-
-    <section class="market-area">
-      <MarketBoard {session} onOpen={(t) => (sheet = t)} />
-    </section>
-
-    <section class="bank-area">
-      <BankRow {session} {selection} onSelection={updateSelection} />
-      {#if passOnly}
-        <button class="btn btn--gold" onclick={() => session.submit(passOnly)}>
-          Pass — no move available
-        </button>
       {/if}
-    </section>
-
-    <section class="me-area">
-      <MyTableau {session} seat={me} onOpen={(t) => (sheet = t)} />
+      <div class="tray">
+        <span class="stat tabular"><CoinIcon size={20} value={myPlayer.gold} /><span class="stat-word label">gold</span></span>
+        <span class="stat tabular"><KeyIcon size={20} /><span class="count">{myPlayer.keys}</span><span class="stat-word label">keys</span></span>
+        <span class="stat score tabular"><span class="gilt count">{myScore}</span><span class="stat-word label">pts</span></span>
+      </div>
     </section>
   </main>
 </div>
@@ -136,16 +163,10 @@
 {#if rulesOpen}
   <RulesLeaflet onClose={() => (rulesOpen = false)} />
 {/if}
-{#if sheet}
-  <CardSheet {session} target={sheet} onClose={() => (sheet = null)} />
+{#if sel.kind === 'sheet'}
+  <CardSheet {session} slot={sel.slot} onClose={clearSelection} onCommit={commitSheet} />
 {/if}
-{#if myPending?.kind === 'returnTokens'}
-  <TokenReturnDialog {session} />
-{/if}
-{#if myPending?.kind === 'chooseNoble'}
-  <NobleChoiceDialog {session} />
-{/if}
-<VictoryOverlay {session} {onRematch} onExit={onExit} />
+<VictoryOverlay {session} {onRematch} {onExit} />
 
 <style>
   .screen {
@@ -160,136 +181,117 @@
 
   .topbar {
     display: flex;
-    gap: var(--sp-3);
+    gap: var(--sp-2);
     align-items: center;
-    flex-wrap: wrap;
   }
 
-  .exit {
-    padding: 8px 14px;
+  .small {
+    padding: 8px 12px;
     min-height: 36px;
-  }
-
-  .turn {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-right: auto;
+    font-size: var(--fs-xs);
   }
 
   .turnline {
-    font-family: var(--font-display);
-    font-weight: 600;
-    font-size: var(--fs-md);
-    letter-spacing: 0.03em;
+    /* the big turn banner: blackletter, well above the 18px floor */
+    font-size: var(--fs-lg);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    flex: 1;
+    text-align: center;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .final {
-    color: var(--gold-hi);
+  .top-actions {
+    display: flex;
+    gap: var(--sp-1);
   }
 
   .notice {
-    background: color-mix(in srgb, var(--gold) 14%, var(--lacquer));
-    color: var(--gold-hi);
-    border-radius: var(--r-chip);
-    box-shadow: var(--hairline-dim);
+    background: color-mix(in srgb, var(--rubric) 12%, var(--panel));
+    color: var(--rubric);
+    border: 1px solid var(--rubric);
+    border-radius: var(--radius);
     padding: var(--sp-2) var(--sp-4);
     text-align: center;
-    letter-spacing: 0.04em;
+    font-style: italic;
   }
 
   .opponents {
     display: flex;
     gap: var(--sp-2);
     flex-wrap: wrap;
+    justify-content: center;
   }
 
   .table {
     display: grid;
     gap: var(--sp-4);
-    grid-template-areas:
-      'nobles nobles'
-      'market bank'
-      'me me';
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr;
     align-items: start;
   }
 
-  /* keep scrollable children from propagating min-content width to the tracks */
   .table > section {
     min-width: 0;
-  }
-
-  .nobles {
-    grid-area: nobles;
-    display: flex;
-    gap: var(--sp-3);
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-
-  .noble {
-    width: clamp(96px, 12vw, 136px);
-  }
-
-  .market-area {
-    grid-area: market;
-  }
-
-  .bank-area {
-    grid-area: bank;
+    padding: var(--sp-3);
     display: flex;
     flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .area-title {
+    margin: 0;
+    font-family: var(--font-ui);
+  }
+
+  .placing-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+  }
+
+  .placing-hint {
+    font-style: italic;
+    color: var(--ink-soft);
+    font-size: var(--fs-xs);
+  }
+
+  .tray {
+    display: flex;
     gap: var(--sp-4);
     align-items: center;
-    position: sticky;
-    top: var(--sp-3);
+    border-top: 1px solid var(--line);
+    padding-top: var(--sp-2);
   }
 
-  .me-area {
-    grid-area: me;
+  .stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-ui);
+    font-weight: 700;
+    font-size: var(--fs-md);
   }
 
-  /* desktop: vertical bank column to the right of the market */
-  @media (min-width: 900px) {
-    .bank-area :global(.chips) {
-      flex-direction: column;
-    }
+  .count {
+    font-size: var(--fs-md);
   }
 
-  /* phone: single column, bank sticks above own tableau */
-  @media (max-width: 899px) {
+  .score {
+    margin-left: auto;
+  }
+
+  .stat-word {
+    font-size: 0.62rem;
+  }
+
+  /* desktop: market left, kingdom right */
+  @media (min-width: 940px) {
     .table {
-      grid-template-areas:
-        'nobles'
-        'market'
-        'bank'
-        'me';
-      grid-template-columns: 1fr;
-    }
-
-    .nobles {
-      justify-content: flex-start;
-      overflow-x: auto;
-      flex-wrap: nowrap;
-      padding-bottom: var(--sp-1);
-    }
-
-    .noble {
-      width: 104px;
-      flex: none;
-    }
-
-    .bank-area {
-      position: sticky;
-      bottom: var(--sp-2);
-      top: auto;
-      z-index: 10;
-      background: color-mix(in srgb, var(--lacquer) 88%, transparent);
-      border-radius: var(--r-card);
-      padding: var(--sp-2);
-      box-shadow: var(--shadow);
-      width: 100%;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     }
   }
 </style>
