@@ -1,44 +1,40 @@
-import { cardsOfTier, GOLD_COUNT, NOBLES, SCALING } from '../data'
+import { cardsOfDeck } from '../data'
 import { mulberry32, seededShuffle } from './rng'
-import { emptyTokenBag, GEMS } from './types'
-import type { GameConfig, GameState, PlayerState, Tier } from './types'
-
-const MARKET_SLOTS = 4
+import { ROW_SLOTS, START_GOLD, START_KEYS } from './types'
+import type { Deck, GameConfig, GameState, PlayerState } from './types'
 
 function emptyPlayer(): PlayerState {
-  return { tokens: emptyTokenBag(), cards: [], reserved: [], nobles: [] }
+  return { gold: START_GOLD, keys: START_KEYS, placed: [] }
 }
 
 /**
  * Deterministic: the same config produces the identical state on every
- * client (decks, market and noble reveal all flow from one seeded rng in a
- * fixed draw order), which is what makes log replay and resync work.
+ * client (both decks and rows flow from one seeded rng in a fixed draw
+ * order — castle first, then village; never reorder these calls), which
+ * is what makes log replay and resync work.
  */
 export function createGame(cfg: GameConfig): GameState {
   const rng = mulberry32(cfg.sharedSeed)
 
-  const decks = [1, 2, 3].map((t) =>
-    seededShuffle(cardsOfTier(t as Tier).map((c) => c.id), rng),
-  ) as [number[], number[], number[]]
-  const market = decks.map((deck) =>
-    Array.from({ length: MARKET_SLOTS }, () => deck.pop() ?? null),
-  )
-  const nobles = seededShuffle(NOBLES.map((n) => n.id), rng).slice(0, cfg.playerCount + 1)
-
-  const bank = emptyTokenBag()
-  for (const g of GEMS) bank[g] = SCALING[cfg.playerCount].tokens
-  bank.gold = GOLD_COUNT
+  const decks = {} as Record<Deck, number[]>
+  const rows = {} as Record<Deck, (number | null)[]>
+  for (const d of ['castle', 'village'] as const) {
+    decks[d] = seededShuffle(cardsOfDeck(d).map((c) => c.id), rng)
+    rows[d] = Array.from({ length: ROW_SLOTS }, () => decks[d].pop() ?? null)
+  }
 
   return {
     players: Array.from({ length: cfg.playerCount }, emptyPlayer),
     turn: cfg.startingSeat,
     startingSeat: cfg.startingSeat,
-    bank,
     decks,
-    market,
-    nobles,
-    pending: null,
-    finalRound: false,
+    rows,
+    discard: { castle: [], village: [] },
+    // the messenger starts beside the village row (ruling RL-6)
+    messenger: 'village',
+    keyUsedThisTurn: false,
+    // reshuffle stream seeded apart from the deal so future draws stay stable
+    rngState: (cfg.sharedSeed ^ 0x9e3779b9) >>> 0,
     result: null,
   }
 }

@@ -1,344 +1,358 @@
 import { describe, expect, it } from 'vitest'
-import { CARDS, NOBLES, SCALING } from '../src/data'
+import { cardById, CARDS } from '../src/data'
 import {
   applyMove,
-  autoPayment,
-  createGame,
-  emptyTokenBag,
-  GEMS,
+  allocatePurses,
+  computeResult,
+  effectiveCost,
+  legalCells,
   legalMoves,
-  prestige,
+  normalize,
   publicHash,
+  scoreBreakdown,
+  createGame,
+  FACEDOWN_GOLD,
+  FACEDOWN_KEYS,
+  KINGDOM_CARDS,
+  START_GOLD,
+  START_KEYS,
 } from '../src/engine'
-import type { GameState, Gem, Move } from '../src/engine'
+import type { GameState, Move, Placement, PlayerState } from '../src/engine'
 import { makeConfig, newGame } from './helpers'
 
-/** Ids of `count` cards of `gem` (cheapest tiers first) for engineering discounts. */
-function cardsOf(gem: Gem, count: number): number[] {
-  return CARDS.filter((c) => c.gem === gem)
-    .slice(0, count)
-    .map((c) => c.id)
+/* ------------------------------------------------------------------ */
+/* fixtures                                                            */
+/* ------------------------------------------------------------------ */
+
+const byName = (name: string) => CARDS.find((c) => c.name === name)!
+
+function player(overrides: Partial<PlayerState> = {}): PlayerState {
+  return { gold: START_GOLD, keys: START_KEYS, placed: [], ...overrides }
 }
 
+/** A minimal hand-built state for reducer edge cases. */
+function fixture(overrides: Partial<GameState> = {}): GameState {
+  return {
+    players: [player(), player()],
+    turn: 0,
+    startingSeat: 0,
+    decks: { castle: [10, 11], village: [110, 111] },
+    rows: { castle: [0, 1, 2], village: [100, 101, 102] },
+    discard: { castle: [], village: [] },
+    messenger: 'village',
+    keyUsedThisTurn: false,
+    rngState: 12345,
+    result: null,
+    ...overrides,
+  }
+}
+
+function up(card: number, x: number, y: number): Placement {
+  return { card, x, y, faceDown: false }
+}
+
+/* ------------------------------------------------------------------ */
+
 describe('setup', () => {
-  it('scales bank and nobles by player count', () => {
-    for (const n of [2, 3, 4] as const) {
-      const s = newGame(n)
-      for (const g of GEMS) expect(s.bank[g]).toBe(SCALING[n].tokens)
-      expect(s.bank.gold).toBe(5)
-      expect(s.nobles.length).toBe(n + 1)
-      expect(s.players.length).toBe(n)
+  it('is deterministic per seed and differs across seeds', () => {
+    expect(publicHash(newGame(3, 7))).toBe(publicHash(newGame(3, 7)))
+    expect(publicHash(newGame(3, 7))).not.toBe(publicHash(newGame(3, 8)))
+  })
+
+  it('deals 3 cards per row from the right decks', () => {
+    const g = newGame(2)
+    expect(g.rows.castle).toHaveLength(3)
+    expect(g.rows.village).toHaveLength(3)
+    for (const id of g.rows.castle) expect(cardById.get(id!)!.deck).toBe('castle')
+    for (const id of g.rows.village) expect(cardById.get(id!)!.deck).toBe('village')
+  })
+
+  it('starts players with 15 gold, 2 keys and the messenger at the village row (RL-6)', () => {
+    const g = newGame(4)
+    expect(g.players).toHaveLength(4)
+    for (const p of g.players) {
+      expect(p.gold).toBe(START_GOLD)
+      expect(p.keys).toBe(START_KEYS)
+      expect(p.placed).toEqual([])
     }
-  })
-
-  it('reveals 4 cards per tier and leaves 36/26/16 in the decks', () => {
-    const s = newGame(3)
-    expect(s.market.map((row) => row.length)).toEqual([4, 4, 4])
-    expect(s.market.flat().every((id) => id !== null)).toBe(true)
-    expect(s.decks.map((d) => d.length)).toEqual([36, 26, 16])
-  })
-
-  it('is deterministic from the config', () => {
-    expect(publicHash(newGame(4, 7))).toBe(publicHash(newGame(4, 7)))
-    expect(publicHash(newGame(4, 7))).not.toBe(publicHash(newGame(4, 8)))
+    expect(g.messenger).toBe('village')
   })
 })
 
-describe('take', () => {
-  it('takes 3 distinct gems', () => {
-    const s = applyMove(newGame(2), 0, { type: 'take', gems: ['diamond', 'ruby', 'onyx'] })
-    expect(s.players[0].tokens.diamond).toBe(1)
-    expect(s.bank.diamond).toBe(3)
+describe('grid legality', () => {
+  it('first card goes anywhere (canonically the origin)', () => {
+    expect(legalCells([])).toEqual([{ x: 0, y: 0 }])
+  })
+
+  it('later cards need orthogonal adjacency', () => {
+    const cells = legalCells([up(0, 0, 0)])
+    expect(cells).toHaveLength(4)
+    expect(cells).toContainEqual({ x: 1, y: 0 })
+    expect(cells).not.toContainEqual({ x: 1, y: 1 })
+  })
+
+  it('never lets the bounding box exceed 3×3', () => {
+    // a full horizontal stripe: x ∈ {0,1,2} — no cell at x=-1 or x=3
+    const stripe = [up(0, 0, 0), up(1, 1, 0), up(2, 2, 0)]
+    const cells = legalCells(stripe)
+    expect(cells.every((c) => c.x >= 0 && c.x <= 2)).toBe(true)
+    expect(cells).toContainEqual({ x: 0, y: 1 })
+    // grown to two stripes, y is then also pinned to the 3-band
+    const two = [...stripe, up(3, 0, 1), up(4, 1, 1), up(5, 2, 1)]
+    expect(legalCells(two).every((c) => c.y >= -1 && c.y <= 2)).toBe(true)
+  })
+
+  it('negative coordinates are fine — the window slides (R4.1)', () => {
+    const cells = legalCells([up(0, 0, 0)])
+    expect(cells).toContainEqual({ x: -1, y: 0 })
+  })
+
+  it('a full kingdom offers no cells', () => {
+    const full = Array.from({ length: KINGDOM_CARDS }, (_, i) => up(i, i % 3, Math.floor(i / 3)))
+    expect(legalCells(full)).toEqual([])
+  })
+})
+
+describe('key grammar', () => {
+  it('switch flips the messenger and consumes the key once', () => {
+    const g = fixture()
+    const s1 = applyMove(g, 0, { type: 'useKey', action: 'switch' })
+    expect(s1.messenger).toBe('castle')
+    expect(s1.players[0].keys).toBe(START_KEYS - 1)
+    expect(s1.keyUsedThisTurn).toBe(true)
+    expect(() => applyMove(s1, 0, { type: 'useKey', action: 'switch' })).toThrow(/already/)
+  })
+
+  it('refresh discards the active row and redraws deterministically', () => {
+    const g = fixture()
+    const a = applyMove(g, 0, { type: 'useKey', action: 'refresh' })
+    const b = applyMove(g, 0, { type: 'useKey', action: 'refresh' })
+    expect(publicHash(a)).toBe(publicHash(b))
+    // deck held [110, 111] (top = end): two clean reveals, then the deck is
+    // dry and the just-discarded row shuffles straight back in for the third
+    expect(a.rows.village[0]).toBe(111)
+    expect(a.rows.village[1]).toBe(110)
+    expect([100, 101, 102]).toContain(a.rows.village[2])
+    const everywhere = [
+      ...a.rows.village.filter((c): c is number => c !== null),
+      ...a.decks.village,
+      ...a.discard.village,
+    ]
+    expect(new Set(everywhere)).toEqual(new Set([100, 101, 102, 110, 111]))
+  })
+
+  it('refresh reshuffles the discard when the deck runs dry (RL-5)', () => {
+    const g = fixture({
+      decks: { castle: [10, 11], village: [] },
+      discard: { castle: [], village: [120, 121, 122, 123] },
+    })
+    const s = applyMove(g, 0, { type: 'useKey', action: 'refresh' })
+    // old row (100,101,102) discarded, then the pool reshuffles and 3 reveal
+    const everywhere = [
+      ...s.rows.village.filter((c): c is number => c !== null),
+      ...s.decks.village,
+      ...s.discard.village,
+    ]
+    expect(new Set(everywhere)).toEqual(new Set([100, 101, 102, 120, 121, 122, 123]))
+    expect(s.rows.village.every((c) => c !== null)).toBe(true)
+  })
+
+  it('requires a key and forbids switching to a dead row', () => {
+    const broke = fixture({ players: [player({ keys: 0 }), player()] })
+    expect(() => applyMove(broke, 0, { type: 'useKey', action: 'switch' })).toThrow(/no key/)
+    const dead = fixture({
+      rows: { castle: [null, null, null], village: [100, 101, 102] },
+      decks: { castle: [], village: [] },
+    })
+    expect(() => applyMove(dead, 0, { type: 'useKey', action: 'switch' })).toThrow(/dead/)
+  })
+
+  it('the key gate resets when the turn advances', () => {
+    const g = fixture()
+    const s1 = applyMove(g, 0, { type: 'useKey', action: 'switch' })
+    const s2 = applyMove(s1, 0, { type: 'buy', slot: 0, x: 0, y: 0 })
+    expect(s2.keyUsedThisTurn).toBe(false)
+    expect(s2.turn).toBe(1)
+  })
+})
+
+describe('buy and take-face-down', () => {
+  it('buying pays the cost and places the card', () => {
+    const g = fixture()
+    const id = g.rows.village[0]!
+    const s = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 })
+    const cost = cardById.get(id)!.cost
+    // onBuy effects may add gold back; assert placement + lower bound
+    expect(s.players[0].placed).toContainEqual(up(id, 0, 0))
+    expect(s.players[0].gold).toBeGreaterThanOrEqual(START_GOLD - cost)
     expect(s.turn).toBe(1)
   })
 
-  it('rejects duplicate colors in a 3-take', () => {
-    expect(() =>
-      applyMove(newGame(2), 0, { type: 'take', gems: ['ruby', 'ruby', 'onyx'] }),
-    ).toThrow()
+  it('face-down grants +6 gold +2 keys and a scoreless card (RL-2)', () => {
+    const g = fixture()
+    const s = applyMove(g, 0, { type: 'takeFacedown', slot: 1, x: 0, y: 0 })
+    expect(s.players[0].gold).toBe(START_GOLD + FACEDOWN_GOLD)
+    expect(s.players[0].keys).toBe(START_KEYS + FACEDOWN_KEYS)
+    expect(s.players[0].placed[0].faceDown).toBe(true)
   })
 
-  it('allows 2-of-a-kind only from a stack of at least 4', () => {
-    const s = newGame(2) // 2P: stacks of exactly 4
-    const after = applyMove(s, 0, { type: 'take', gems: ['ruby', 'ruby'] })
-    expect(after.players[0].tokens.ruby).toBe(2)
-
-    const low = newGame(2)
-    low.bank.ruby = 3
-    expect(() => applyMove(low, 0, { type: 'take', gems: ['ruby', 'ruby'] })).toThrow()
+  it('refills the emptied slot from the same deck', () => {
+    const g = fixture()
+    const s = applyMove(g, 0, { type: 'takeFacedown', slot: 0, x: 0, y: 0 })
+    expect(s.rows.village[0]).toBe(111) // deck top = end of array
+    expect(s.decks.village).toEqual([110])
   })
 
-  it('forces short takes when fewer than 3 stacks remain', () => {
-    const s = newGame(2)
-    s.bank.diamond = 0
-    s.bank.sapphire = 0
-    s.bank.emerald = 0
-    // only ruby and onyx left: a 2-distinct take is legal, a lone take is not
-    const takes = legalMoves(s, 0).filter((m): m is Move & { type: 'take' } => m.type === 'take')
-    expect(takes.some((m) => m.gems.length === 2 && m.gems[0] !== m.gems[1])).toBe(true)
-    expect(takes.some((m) => m.gems.length === 1)).toBe(false)
-    expect(() => applyMove(s, 0, { type: 'take', gems: ['ruby'] })).toThrow()
-    const after = applyMove(s, 0, { type: 'take', gems: ['ruby', 'onyx'] })
-    expect(after.players[0].tokens.ruby).toBe(1)
-  })
-})
-
-describe('reserve', () => {
-  it('reserves a market card, grants gold, and refills the slot', () => {
-    const s = newGame(2)
-    const id = s.market[0][0]!
-    const deckTop = s.decks[0][s.decks[0].length - 1]
-    const after = applyMove(s, 0, { type: 'reserve', from: { tier: 1, slot: 0 } })
-    expect(after.players[0].reserved).toEqual([{ card: id, blind: false }])
-    expect(after.players[0].tokens.gold).toBe(1)
-    expect(after.bank.gold).toBe(4)
-    expect(after.market[0][0]).toBe(deckTop)
+  it('rejects illegal cells, empty slots, unaffordable buys, and the wrong seat', () => {
+    const g = fixture()
+    expect(() => applyMove(g, 0, { type: 'buy', slot: 0, x: 5, y: 5 })).toThrow(/cell/)
+    const gap = fixture({ rows: { castle: [0, 1, 2], village: [null, 101, 102] } })
+    expect(() => applyMove(gap, 0, { type: 'takeFacedown', slot: 0, x: 0, y: 0 })).toThrow(/empty/)
+    const broke = fixture({ players: [player({ gold: 0 }), player()] })
+    const costly = cardById.get(broke.rows.village[1]!)!
+    if (costly.cost > 0 && !costly.discount) {
+      expect(() => applyMove(broke, 0, { type: 'buy', slot: 1, x: 0, y: 0 })).toThrow(/afford/)
+    }
+    expect(() => applyMove(g, 1, { type: 'buy', slot: 0, x: 0, y: 0 })).toThrow(/turn/)
   })
 
-  it('reserves blind from a deck top', () => {
-    const s = newGame(2)
-    const deckTop = s.decks[2][s.decks[2].length - 1]
-    const after = applyMove(s, 0, { type: 'reserve', from: { deck: 3 } })
-    expect(after.players[0].reserved).toEqual([{ card: deckTop, blind: true }])
-    expect(after.decks[2].length).toBe(15)
-  })
-
-  it('is still legal with no gold left, just grants none', () => {
-    const s = newGame(2)
-    s.bank.gold = 0
-    const after = applyMove(s, 0, { type: 'reserve', from: { tier: 1, slot: 0 } })
-    expect(after.players[0].tokens.gold).toBe(0)
-  })
-
-  it('rejects a 4th reserve and reserving from an empty deck', () => {
-    const s = newGame(2)
-    s.players[0].reserved = [
-      { card: 0, blind: false },
-      { card: 1, blind: false },
-      { card: 2, blind: false },
-    ]
-    expect(() => applyMove(s, 0, { type: 'reserve', from: { deck: 1 } })).toThrow()
-
-    const t = newGame(2)
-    t.decks[0] = []
-    expect(() => applyMove(t, 0, { type: 'reserve', from: { deck: 1 } })).toThrow()
-    expect(legalMoves(t, 0).some((m) => m.type === 'reserve' && 'deck' in m.from && m.from.deck === 1)).toBe(false)
-  })
-
-  it('leaves the market slot empty when the deck is exhausted', () => {
-    const s = newGame(2)
-    s.decks[0] = []
-    const after = applyMove(s, 0, { type: 'reserve', from: { tier: 1, slot: 2 } })
-    expect(after.market[0][2]).toBe(null)
+  it('messenger icon moves the pawn — also on face-down takes (RL-8)', () => {
+    const carpenter = byName('The Carpenter') // village card sending the messenger to the castle
+    const g = fixture({ rows: { castle: [0, 1, 2], village: [carpenter.id, 101, 102] } })
+    expect(applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 }).messenger).toBe('castle')
+    expect(applyMove(g, 0, { type: 'takeFacedown', slot: 0, x: 0, y: 0 }).messenger).toBe('castle')
   })
 })
 
-describe('purchase', () => {
-  it('pays cost minus discounts, colored tokens first', () => {
-    const s = newGame(2)
-    // card 6: onyx, cost emerald 3
-    s.market[0][0] = 6
-    s.players[0].tokens.emerald = 2
-    s.players[0].cards = cardsOf('emerald', 1) // 1 emerald discount
-    const payment = autoPayment(s.players[0], CARDS[6])!
-    expect(payment.emerald).toBe(2)
-    expect(payment.gold).toBe(0)
-    const after = applyMove(s, 0, { type: 'purchase', from: 'market', card: 6, payment })
-    expect(after.players[0].cards).toContain(6)
-    expect(after.players[0].tokens.emerald).toBe(0)
-    expect(after.bank.emerald).toBe(s.bank.emerald + 2)
+describe('discounts and effects', () => {
+  it('printed discount counts the kingdom before placement, floored at 0 (RL-4)', () => {
+    const mason = byName('The Mason') // cost 5, −2 per castle card in your kingdom
+    expect(effectiveCost([], mason.id)).toBe(5)
+    expect(effectiveCost([up(0, 0, 0), up(1, 1, 0)], mason.id)).toBe(1)
+    expect(effectiveCost([up(0, 0, 0), up(1, 1, 0), up(2, 0, 1)], mason.id)).toBe(0)
   })
 
-  it('covers shortfall with gold and accepts voluntary gold substitution', () => {
-    const s = newGame(2)
-    s.market[0][0] = 6 // cost: emerald 3
-    s.players[0].tokens.emerald = 2
-    s.players[0].tokens.gold = 2
-    const auto = autoPayment(s.players[0], CARDS[6])!
-    expect(auto).toMatchObject({ emerald: 2, gold: 1 })
-    // voluntary: keep an emerald, spend an extra gold instead
-    const custom = { ...emptyTokenBag(), emerald: 1, gold: 2 }
-    const after = applyMove(s, 0, { type: 'purchase', from: 'market', card: 6, payment: custom })
-    expect(after.players[0].tokens).toMatchObject({ emerald: 1, gold: 0 })
+  it('a per-shield immediate effect counts the just-placed card itself (RL-4)', () => {
+    const marshal = byName('The Marshal') // +2 gold per gules shield, carries 2 gules itself
+    const g = fixture({ rows: { castle: [marshal.id, 1, 2], village: [100, 101, 102] }, messenger: 'castle' })
+    const s = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 })
+    expect(s.players[0].gold).toBe(START_GOLD - marshal.cost + 4)
   })
 
-  it('rejects overpay and short pay', () => {
-    const s = newGame(2)
-    s.market[0][0] = 6 // cost: emerald 3
-    s.players[0].tokens.emerald = 5
-    expect(() =>
-      applyMove(s, 0, {
-        type: 'purchase',
-        from: 'market',
-        card: 6,
-        payment: { ...emptyTokenBag(), emerald: 4 },
-      }),
-    ).toThrow()
-    expect(() =>
-      applyMove(s, 0, {
-        type: 'purchase',
-        from: 'market',
-        card: 6,
-        payment: { ...emptyTokenBag(), emerald: 2 },
-      }),
-    ).toThrow()
-  })
-
-  it('purchases a blind-reserved card', () => {
-    const s = newGame(2)
-    s.players[0].reserved = [{ card: 6, blind: true }]
-    s.players[0].tokens.emerald = 3
-    const after = applyMove(s, 0, {
-      type: 'purchase',
-      from: 'reserved',
-      card: 6,
-      payment: { ...emptyTokenBag(), emerald: 3 },
+  it('opponent effects settle deterministically and floor at 0', () => {
+    const tax = byName('The Tax Collector') // each opponent −1, you +1 per opponent
+    const g = fixture({
+      players: [player(), player({ gold: 0 }), player()],
+      rows: { castle: [tax.id, 1, 2], village: [100, 101, 102] },
+      messenger: 'castle',
     })
-    expect(after.players[0].reserved).toEqual([])
-    expect(after.players[0].cards).toContain(6)
+    const s = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 })
+    expect(s.players[1].gold).toBe(0) // floored
+    expect(s.players[2].gold).toBe(START_GOLD - 1)
+    expect(s.players[0].gold).toBe(START_GOLD - tax.cost + 2)
   })
 })
 
-describe('token cap', () => {
-  function overCap(): GameState {
-    const s = newGame(4) // 7-token stacks
-    s.players[0].tokens = { ...emptyTokenBag(), diamond: 4, sapphire: 4, gold: 1 } // 9 held
-    s.bank.diamond -= 4
-    s.bank.sapphire -= 4
-    s.bank.gold -= 1
-    return applyMove(s, 0, { type: 'take', gems: ['emerald', 'ruby', 'onyx'] }) // now 12
-  }
+describe('scoring', () => {
+  it('normalizes a slid window back to 0..2', () => {
+    const placed = [up(0, -2, -1), up(1, -1, -1), up(2, -2, 0)]
+    const pos = normalize(placed)
+    expect(pos.get(0)).toEqual({ x: 0, y: 0 })
+    expect(pos.get(1)).toEqual({ x: 1, y: 0 })
+  })
 
-  it('demands the exact excess back before the turn ends', () => {
-    const s = overCap()
-    expect(s.pending).toMatchObject({ kind: 'returnTokens', actor: 0, excess: 2 })
-    expect(s.turn).toBe(0) // turn has not advanced
-    expect(() =>
-      applyMove(s, 0, { type: 'return', tokens: { ...emptyTokenBag(), diamond: 1 } }),
-    ).toThrow()
-    const after = applyMove(s, 0, {
-      type: 'return',
-      tokens: { ...emptyTokenBag(), diamond: 1, gold: 1 }, // gold is returnable too
+  it('position scoring reads the normalized grid (R6.4)', () => {
+    const queen = byName('The Queen') // 8 pts in the center
+    // queen at raw (-1,-1) inside a full 3×3 spanning (-2..0)²: the center
+    const placed: Placement[] = []
+    for (let y = -2; y <= 0; y++) {
+      for (let x = -2; x <= 0; x++) {
+        placed.push(up(x === -1 && y === -1 ? queen.id : 101, x, y))
+      }
+    }
+    const p = player({ placed, keys: 0, gold: 0 })
+    const line = scoreBreakdown(p).cards.find((c) => c.card === queen.id)!
+    expect(line.points).toBe(8)
+  })
+
+  it('fills purses greedily by rate and keeps the leftover as tiebreak gold (RL-3, RL-10)', () => {
+    const inn = byName('The Innkeeper') // purse 6 @ 2 pts/gold
+    const lender = byName('The Moneylender') // purse 10 @ 1 pt/gold
+    const p = player({ gold: 10, keys: 0, placed: [up(inn.id, 0, 0), up(lender.id, 1, 0)] })
+    const { purseGold, leftover } = allocatePurses(p)
+    expect(purseGold.get(0)).toBe(6) // best rate filled first
+    expect(purseGold.get(1)).toBe(4)
+    expect(leftover).toBe(0)
+    const rich = player({ gold: 20, keys: 0, placed: [up(inn.id, 0, 0)] })
+    expect(allocatePurses(rich).leftover).toBe(14)
+  })
+
+  it('keys score 1 each; face-down cards score 0', () => {
+    const p = player({ keys: 3, gold: 0, placed: [{ card: 0, x: 0, y: 0, faceDown: true }] })
+    const b = scoreBreakdown(p)
+    expect(b.keyPoints).toBe(3)
+    expect(b.cards[0].points).toBe(0)
+    expect(b.total).toBe(3)
+  })
+
+  it('game ends when all kingdoms hold 9; tiebreak is leftover gold', () => {
+    const nine = (base: number) =>
+      Array.from({ length: 9 }, (_, i) => ({
+        card: base,
+        x: i % 3,
+        y: Math.floor(i / 3),
+        faceDown: true,
+      }))
+    const g = fixture({
+      players: [
+        player({ placed: nine(0).slice(0, 8), gold: 2, keys: 0 }),
+        player({ placed: nine(100), gold: 7, keys: 0 }),
+      ],
     })
-    expect(after.pending).toBe(null)
-    expect(after.turn).toBe(1)
-    expect(after.players[0].tokens.gold).toBe(0)
-  })
-
-  it('only offers return moves while pending', () => {
-    const s = overCap()
-    const moves = legalMoves(s, 0)
-    expect(moves.length).toBeGreaterThan(0)
-    expect(moves.every((m) => m.type === 'return')).toBe(true)
-    expect(legalMoves(s, 1)).toEqual([])
+    const s = applyMove(g, 0, { type: 'takeFacedown', slot: 0, x: 2, y: 2 })
+    expect(s.result).not.toBeNull()
+    // all-face-down kingdoms → 0 card points for both; gold decides
+    const r = computeResult(s)
+    expect(r.winners).toEqual([0]) // seat 0 took face-down: 2+6=8 gold beats 7
   })
 })
 
-describe('nobles', () => {
-  it('auto-awards a single qualifying noble at end of turn', () => {
-    const s = newGame(2)
-    s.nobles = [7] // emerald 4 + ruby 4
-    s.players[0].cards = [...cardsOf('emerald', 4), ...cardsOf('ruby', 4)]
-    const after = applyMove(s, 0, { type: 'take', gems: ['diamond', 'sapphire', 'onyx'] })
-    expect(after.players[0].nobles).toEqual([7])
-    expect(after.nobles).toEqual([])
+describe('legalMoves', () => {
+  it('enumerates keys, buys and face-down takes for the acting seat only', () => {
+    const g = newGame(2)
+    expect(legalMoves(g, 1)).toEqual([])
+    const moves = legalMoves(g, 0)
+    expect(moves.some((m) => m.type === 'useKey' && m.action === 'switch')).toBe(true)
+    expect(moves.some((m) => m.type === 'useKey' && m.action === 'refresh')).toBe(true)
+    expect(moves.some((m) => m.type === 'takeFacedown')).toBe(true)
+    // every enumerated move is accepted by the reducer
+    for (const m of moves) expect(() => applyMove(g, 0, m)).not.toThrow()
   })
 
-  it('asks the player to choose when several nobles qualify', () => {
-    const s = newGame(2)
-    s.nobles = [7, 8] // emerald4+ruby4, ruby4+onyx4
-    s.players[0].cards = [...cardsOf('emerald', 4), ...cardsOf('ruby', 4), ...cardsOf('onyx', 4)]
-    const after = applyMove(s, 0, { type: 'take', gems: ['diamond', 'sapphire', 'onyx'] })
-    expect(after.pending).toMatchObject({ kind: 'chooseNoble', actor: 0, options: [7, 8] })
-    const chosen = applyMove(after, 0, { type: 'chooseNoble', noble: 8 })
-    expect(chosen.players[0].nobles).toEqual([8])
-    expect(chosen.nobles).toEqual([7]) // the other stays on display
-    expect(chosen.turn).toBe(1)
+  it('offers no second key spend and no moves after the game ends', () => {
+    const g = fixture()
+    const s = applyMove(g, 0, { type: 'useKey', action: 'switch' })
+    expect(legalMoves(s, 0).every((m) => m.type !== 'useKey')).toBe(true)
+    const over = fixture({ result: { ranking: [0, 1], winners: [0], breakdown: [] } })
+    expect(legalMoves(over, 0)).toEqual([])
   })
 })
 
-describe('final round and result', () => {
-  /** 15+ points of tier-3 ruby cards (4+4+5 = 13… use 3 cards ≥15: 3+4+4+5 ids). */
-  function bigCards(): number[] {
-    return CARDS.filter((c) => c.tier === 3 && c.gem === 'ruby').map((c) => c.id) // 3+4+4+5 = 16 pts
-  }
-
-  it('finishes the round so every player gets equal turns', () => {
-    const s = newGame(3) // seats 0,1,2 — starting seat 0
-    s.players[1].cards = bigCards() // seat 1 already at 16 prestige
-    // seat 0 acts: no final round triggered by someone else's cards
-    let cur = applyMove(s, 0, { type: 'take', gems: ['diamond', 'sapphire', 'emerald'] })
-    expect(cur.finalRound).toBe(false)
-    // seat 1 ends a turn at ≥15: final round begins
-    cur = applyMove(cur, 1, { type: 'take', gems: ['diamond', 'sapphire', 'emerald'] })
-    expect(cur.finalRound).toBe(true)
-    expect(cur.result).toBe(null) // seat 2 still gets a turn
-    cur = applyMove(cur, 2, { type: 'take', gems: ['diamond', 'sapphire', 'emerald'] })
-    expect(cur.result).not.toBe(null)
-    expect(cur.result!.winners).toEqual([1])
-  })
-
-  it('lets a later seat overtake during the final round', () => {
-    const s = newGame(2)
-    s.nobles = []
-    s.players[0].cards = bigCards() // 16 pts
-    // seat 1: 11 pts of cards + a noble = 14, with a 5-pointer within reach
-    s.players[1].cards = CARDS.filter((c) => c.tier === 3 && c.gem === 'emerald')
-      .map((c) => c.id)
-      .slice(0, 3) // pts 3+4+4 = 11
-    s.players[1].nobles = [0]
-    s.players[1].tokens = { ...emptyTokenBag(), sapphire: 4, gold: 3 } // 2P bank only holds 4 sapphire
-    s.bank.sapphire -= 4
-    s.bank.gold -= 3
-    const big = CARDS.find((c) => c.tier === 3 && c.gem === 'emerald' && c.points === 5)! // u7 g3
-    s.market[2][0] = big.id
-    let cur = applyMove(s, 0, { type: 'take', gems: ['diamond', 'emerald', 'ruby'] })
-    expect(cur.finalRound).toBe(true)
-    cur = applyMove(cur, 1, {
-      type: 'purchase',
-      from: 'market',
-      card: big.id,
-      payment: autoPayment(cur.players[1], big)!, // emerald owed covered by 3 discounts
-    })
-    expect(cur.result).not.toBe(null)
-    expect(prestige(cur.players[1])).toBe(19)
-    expect(cur.result!.winners).toEqual([1])
-  })
-
-  it('breaks prestige ties by fewest development cards', () => {
-    const s = newGame(2)
-    s.nobles = []
-    s.players[0].cards = bigCards() // 16 pts, 4 cards
-    s.players[1].cards = [
-      ...CARDS.filter((c) => c.tier === 3 && c.gem === 'emerald' && c.points >= 4).map((c) => c.id), // 4+4+5=13
-    ]
-    s.players[1].nobles = [0] // +3 → 16 pts, 3 cards
-    let cur = applyMove(s, 0, { type: 'take', gems: ['diamond', 'sapphire', 'emerald'] })
-    cur = applyMove(cur, 1, { type: 'take', gems: ['diamond', 'sapphire', 'emerald'] })
-    expect(cur.result!.winners).toEqual([1]) // same 16 pts, fewer cards
-  })
-})
-
-describe('pass', () => {
-  it('is legal only when nothing else is', () => {
-    const s = newGame(2)
-    expect(() => applyMove(s, 0, { type: 'pass' })).toThrow()
-
-    const stuck = newGame(2)
-    stuck.bank = emptyTokenBag() // nothing to take, no gold
-    stuck.market = [[null, null, null, null], [null, null, null, null], [null, null, null, null]]
-    stuck.decks = [[], [], []]
-    const moves = legalMoves(stuck, 0)
-    expect(moves).toEqual([{ type: 'pass' }])
-    const after = applyMove(stuck, 0, { type: 'pass' })
-    expect(after.turn).toBe(1)
-  })
-})
-
-describe('config plumbing', () => {
-  it('starts at the configured seat', () => {
-    const s = createGame(makeConfig(3, 42, 2))
-    expect(s.turn).toBe(2)
-    expect(s.startingSeat).toBe(2)
+describe('replay', () => {
+  it('a recorded move log folds to the identical state', () => {
+    const cfg = makeConfig(2, 99)
+    let s = createGame(cfg)
+    const log: { actor: number; move: Move }[] = []
+    const pick = (n: number) => Math.abs(Math.floor(Math.sin(log.length * 999.1) * 1e6)) % n
+    while (!s.result) {
+      const moves = legalMoves(s, s.turn)
+      expect(moves.length).toBeGreaterThan(0)
+      const move = moves[pick(moves.length)]
+      log.push({ actor: s.turn, move })
+      s = applyMove(s, s.turn, move)
+    }
+    let replayed = createGame(cfg)
+    for (const { actor, move } of log) replayed = applyMove(replayed, actor, move)
+    expect(publicHash(replayed)).toBe(publicHash(s))
   })
 })

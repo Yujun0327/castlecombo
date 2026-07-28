@@ -1,4 +1,4 @@
-import { applyMove, createGame, legalMoves, prestige, publicHash, redact } from '../engine'
+import { applyMove, createGame, legalMoves, publicHash, redact, scoreBreakdown } from '../engine'
 import type { GameConfig, GameState, Move, Seat } from '../engine'
 import { PROTOCOL_VERSION } from '../transport/types'
 import type { LobbySeat, NetMsg, Transport, WireMove } from '../transport/types'
@@ -6,7 +6,7 @@ import { connectRoom } from '../transport/trystero'
 import { clearGame, loadGame, saveGame } from './persist'
 import type { SavedGame } from './persist'
 
-export type SfxEvent = 'take' | 'reserve' | 'purchase' | 'noble' | 'return' | 'win' | 'lose'
+export type SfxEvent = 'key' | 'buy' | 'facedown' | 'coins' | 'win' | 'lose'
 
 export const RULES_VERSION = '1'
 
@@ -36,7 +36,7 @@ export abstract class BaseSession {
   }
 
   get actor(): Seat {
-    return this.state.pending?.actor ?? this.state.turn
+    return this.state.turn
   }
 
   /** Can the local human act right now? */
@@ -58,12 +58,12 @@ export abstract class BaseSession {
     const after = applyMove(before, actor, move)
     this.state = after
 
-    if (move.type === 'take') this.emit('take')
-    if (move.type === 'reserve') this.emit('reserve')
-    if (move.type === 'purchase') this.emit('purchase')
-    if (move.type === 'return') this.emit('return')
-    const nobleCount = (s: GameState) => s.players.reduce((n, p) => n + p.nobles.length, 0)
-    if (nobleCount(after) > nobleCount(before)) this.emit('noble')
+    if (move.type === 'useKey') this.emit('key')
+    if (move.type === 'buy') this.emit('buy')
+    if (move.type === 'takeFacedown') this.emit('facedown')
+    // any gold swing beyond the purchase price gets a coin clink
+    const gold = (s: GameState) => s.players.reduce((n, p) => n + p.gold, 0)
+    if (gold(after) > gold(before)) this.emit('coins')
     if (!before.result && after.result) {
       const won = this.mySeat === null || after.result.winners.includes(this.mySeat)
       this.emit(won ? 'win' : 'lose')
@@ -104,9 +104,12 @@ export class HotseatSession extends BaseSession {
   }
 }
 
-/** Prestige for every seat, for scoreboards. */
+/**
+ * Live "if the game ended now" score per seat, for scoreboards: scroll
+ * points on the partial grid + keys, with current gold on purses.
+ */
 export function scores(state: GameState): number[] {
-  return state.players.map((p) => prestige(p))
+  return state.players.map((p) => (p.placed.length ? scoreBreakdown(p).total : p.keys))
 }
 
 /* ------------------------------------------------------------------ */

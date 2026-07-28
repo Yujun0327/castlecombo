@@ -1,9 +1,11 @@
-import { cardById, nobleById } from '../data'
+import { cardById } from '../data'
 import { deepClone } from './clone'
-import { legalMoves } from './legality'
-import { discounts, prestige, validatePayment } from './payments'
-import { bagTotal, GEMS, RESERVE_CAP, TOKEN_CAP, TOKEN_COLORS, WIN_POINTS } from './types'
-import type { GameState, Gem, Move, Seat, Tier } from './types'
+import { effectiveCost, resolveEffects } from './effects'
+import { legalCells } from './legality'
+import { mulberry32, seededShuffle } from './rng'
+import { computeResult } from './scoring'
+import { FACEDOWN_GOLD, FACEDOWN_KEYS, KINGDOM_CARDS, otherDeck, ROW_SLOTS } from './types'
+import type { Deck, GameState, Move, Placement, Seat } from './types'
 
 /**
  * The single pure reducer. Throws on any illegal move; never mutates `prev`.
@@ -12,174 +14,102 @@ import type { GameState, Gem, Move, Seat, Tier } from './types'
  */
 export function applyMove(prev: GameState, actor: Seat, move: Move): GameState {
   if (prev.result) throw new Error('game is over')
-  const expected = prev.pending?.actor ?? prev.turn
-  if (actor !== expected) throw new Error('not your turn')
+  if (actor !== prev.turn) throw new Error('not your turn')
 
   const state = deepClone(prev)
   const player = state.players[actor]
 
   switch (move.type) {
-    case 'take': {
-      validateTake(state, move.gems)
-      for (const g of move.gems) {
-        state.bank[g]--
-        player.tokens[g]++
-      }
-      finishAction(state, actor)
-      break
-    }
-
-    case 'reserve': {
-      if (player.reserved.length >= RESERVE_CAP) throw new Error('reserve is full')
-      if ('deck' in move.from) {
-        const deck = state.decks[move.from.deck - 1]
-        const card = deck.pop()
-        if (card === undefined) throw new Error('deck is empty')
-        player.reserved.push({ card, blind: true })
+    case 'useKey': {
+      if (state.keyUsedThisTurn) throw new Error('key already spent this turn')
+      if (player.keys < 1) throw new Error('no key')
+      if (move.action === 'switch') {
+        const other = otherDeck(state.messenger)
+        if (!state.rows[other].some((c) => c !== null)) throw new Error('other row is dead')
+        state.messenger = other
       } else {
-        const { tier, slot } = move.from
-        const card = state.market[tier - 1]?.[slot]
-        if (card === null || card === undefined) throw new Error('empty market slot')
-        player.reserved.push({ card, blind: false })
-        refill(state, tier, slot)
+        const d = state.messenger
+        if (state.decks[d].length + state.discard[d].length === 0) throw new Error('nothing to redraw')
+        // discard the row FIRST, then reveal — the discards may shuffle right back (RL-7)
+        for (let s = 0; s < ROW_SLOTS; s++) {
+          const c = state.rows[d][s]
+          if (c !== null) state.discard[d].push(c)
+          state.rows[d][s] = null
+        }
+        for (let s = 0; s < ROW_SLOTS; s++) state.rows[d][s] = draw(state, d)
       }
-      if (state.bank.gold > 0) {
-        state.bank.gold--
-        player.tokens.gold++
-      }
-      finishAction(state, actor)
-      break
+      player.keys--
+      state.keyUsedThisTurn = true
+      return state
     }
 
-    case 'purchase': {
-      const def = cardById.get(move.card)
-      if (!def) throw new Error('unknown card')
-      if (move.from === 'market') {
-        const tier = def.tier
-        const slot = state.market[tier - 1].indexOf(move.card)
-        if (slot === -1) throw new Error('card not in market')
-        const err = validatePayment(player, def, move.payment)
-        if (err) throw new Error(err)
-        refill(state, tier, slot)
+    case 'buy':
+    case 'takeFacedown': {
+      const card = state.rows[state.messenger][move.slot]
+      if (card === null || card === undefined) throw new Error('empty slot')
+      if (player.placed.length >= KINGDOM_CARDS) throw new Error('kingdom is full')
+      if (!legalCells(player.placed).some((c) => c.x === move.x && c.y === move.y)) {
+        throw new Error('illegal cell')
+      }
+
+      const placement: Placement = {
+        card,
+        x: move.x,
+        y: move.y,
+        faceDown: move.type === 'takeFacedown',
+      }
+
+      if (move.type === 'buy') {
+        const cost = effectiveCost(player.placed, card)
+        if (cost > player.gold) throw new Error('cannot afford')
+        player.gold -= cost
+        player.placed.push(placement)
+        resolveEffects(state, actor, placement, cardById.get(card)!.onBuy ?? [])
       } else {
-        const idx = player.reserved.findIndex((r) => r.card === move.card)
-        if (idx === -1) throw new Error('card not reserved')
-        const err = validatePayment(player, def, move.payment)
-        if (err) throw new Error(err)
-        player.reserved.splice(idx, 1)
+        player.gold += FACEDOWN_GOLD
+        player.keys += FACEDOWN_KEYS
+        player.placed.push(placement)
       }
-      for (const c of TOKEN_COLORS) {
-        player.tokens[c] -= move.payment[c]
-        state.bank[c] += move.payment[c]
-      }
-      player.cards.push(move.card)
-      finishAction(state, actor)
-      break
-    }
 
-    case 'return': {
-      if (state.pending?.kind !== 'returnTokens') throw new Error('no return pending')
-      if (bagTotal(move.tokens) !== state.pending.excess) throw new Error('wrong return count')
-      for (const c of TOKEN_COLORS) {
-        if (move.tokens[c] < 0 || move.tokens[c] > player.tokens[c]) throw new Error(`bad ${c} return`)
-      }
-      for (const c of TOKEN_COLORS) {
-        player.tokens[c] -= move.tokens[c]
-        state.bank[c] += move.tokens[c]
-      }
-      state.pending = null
-      checkNobles(state, actor)
-      break
-    }
-
-    case 'chooseNoble': {
-      if (state.pending?.kind !== 'chooseNoble') throw new Error('no noble pending')
-      if (!state.pending.options.includes(move.noble)) throw new Error('noble not offered')
-      awardNoble(state, actor, move.noble)
-      state.pending = null
-      advanceTurn(state, actor)
-      break
-    }
-
-    case 'pass': {
-      const legal = legalMoves(prev, actor)
-      if (!(legal.length === 1 && legal[0].type === 'pass')) throw new Error('pass not allowed')
-      advanceTurn(state, actor)
-      break
+      const row = state.messenger
+      refill(state, row, move.slot)
+      // the messenger icon is public on the market card, so it moves the pawn
+      // even for face-down takes (RL-8)
+      const icon = cardById.get(card)!.messenger
+      if (icon && state.rows[icon].some((c) => c !== null)) state.messenger = icon
+      advanceTurn(state)
+      return state
     }
   }
-
-  return state
 }
 
-function validateTake(state: GameState, gems: readonly Gem[]): void {
-  if (gems.length === 2 && gems[0] === gems[1]) {
-    // two of a kind: only from a stack of 4 or more
-    if (state.bank[gems[0]] < 4) throw new Error('need 4 in the stack to take 2')
-    return
+/** Pop from a deck, deterministically reshuffling its discard first if needed (RL-5). */
+function draw(state: GameState, d: Deck): number | null {
+  if (state.decks[d].length === 0 && state.discard[d].length > 0) {
+    state.rngState = (Math.imul(state.rngState, 1664525) + 1013904223) >>> 0
+    state.decks[d] = seededShuffle(state.discard[d], mulberry32(state.rngState))
+    state.discard[d] = []
   }
-  if (new Set(gems).size !== gems.length) throw new Error('duplicate colors')
-  for (const g of gems) {
-    if (state.bank[g] < 1) throw new Error(`no ${g} in the bank`)
+  return state.decks[d].pop() ?? null
+}
+
+function refill(state: GameState, d: Deck, slot: number): void {
+  state.rows[d][slot] = draw(state, d)
+  // a fully dead row pins the messenger to the surviving one (RL-5)
+  if (
+    state.messenger === d &&
+    !state.rows[d].some((c) => c !== null) &&
+    state.rows[otherDeck(d)].some((c) => c !== null)
+  ) {
+    state.messenger = otherDeck(d)
   }
-  // must take as many distinct colors as the bank allows, up to 3
-  const nonEmpty = GEMS.filter((g) => state.bank[g] > 0).length
-  if (gems.length !== Math.min(3, nonEmpty)) throw new Error('must take the maximum available colors')
 }
 
-function refill(state: GameState, tier: Tier, slot: number): void {
-  state.market[tier - 1][slot] = state.decks[tier - 1].pop() ?? null
-}
-
-/** After the main action: token cap first, then nobles, then next turn. */
-function finishAction(state: GameState, actor: Seat): void {
-  const total = bagTotal(state.players[actor].tokens)
-  if (total > TOKEN_CAP) {
-    state.pending = { kind: 'returnTokens', actor, excess: total - TOKEN_CAP }
-    return
-  }
-  checkNobles(state, actor)
-}
-
-function checkNobles(state: GameState, actor: Seat): void {
-  const disc = discounts(state.players[actor])
-  const qualifying = state.nobles.filter((id) => {
-    const req = nobleById.get(id)!.req
-    return GEMS.every((g) => disc[g] >= (req[g] ?? 0))
-  })
-  if (qualifying.length >= 2) {
-    state.pending = { kind: 'chooseNoble', actor, options: qualifying }
-    return
-  }
-  if (qualifying.length === 1) awardNoble(state, actor, qualifying[0])
-  advanceTurn(state, actor)
-}
-
-function awardNoble(state: GameState, actor: Seat, noble: number): void {
-  state.nobles = state.nobles.filter((id) => id !== noble)
-  state.players[actor].nobles.push(noble)
-}
-
-function advanceTurn(state: GameState, actor: Seat): void {
-  if (prestige(state.players[actor]) >= WIN_POINTS) state.finalRound = true
+function advanceTurn(state: GameState): void {
+  state.keyUsedThisTurn = false
   state.turn = (state.turn + 1) % state.players.length
-  // the final round is over once the turn wraps back to the starting seat:
-  // every player has then had the same number of turns
-  if (state.finalRound && state.turn === state.startingSeat) {
+  // equal turns by construction: the game ends exactly when all kingdoms hold 9
+  if (state.players.every((p) => p.placed.length >= KINGDOM_CARDS)) {
     state.result = computeResult(state)
   }
-}
-
-function computeResult(state: GameState): NonNullable<GameState['result']> {
-  const seats = state.players.map((_, i) => i)
-  const score = (s: Seat) => prestige(state.players[s])
-  const cardCount = (s: Seat) => state.players[s].cards.length
-  const ranking = [...seats].sort(
-    (a, b) => score(b) - score(a) || cardCount(a) - cardCount(b) || a - b,
-  )
-  const best = ranking[0]
-  const winners = ranking.filter(
-    (s) => score(s) === score(best) && cardCount(s) === cardCount(best),
-  )
-  return { ranking, winners }
 }

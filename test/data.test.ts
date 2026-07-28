@@ -1,76 +1,90 @@
 import { describe, expect, it } from 'vitest'
-import { CARDS, NOBLES } from '../src/data'
-import { GEMS } from '../src/engine'
-import type { Gem } from '../src/engine'
+import { CARDS, cardById, cardsOfDeck } from '../src/data'
+import { SHIELDS } from '../src/engine'
+import type { Countable, Effect, Scoring } from '../src/engine'
 
-describe('card data', () => {
-  it('has 90 cards with stable unique ids', () => {
-    expect(CARDS.length).toBe(90)
-    expect(new Set(CARDS.map((c) => c.id)).size).toBe(90)
-    CARDS.forEach((c, i) => expect(c.id).toBe(i))
-  })
+/**
+ * Catalog validation (RL-1: data is provisional, but its SHAPE is contract).
+ */
 
-  it('has the official tier distribution 40/30/20', () => {
-    expect(CARDS.filter((c) => c.tier === 1).length).toBe(40)
-    expect(CARDS.filter((c) => c.tier === 2).length).toBe(30)
-    expect(CARDS.filter((c) => c.tier === 3).length).toBe(20)
-  })
+function countables(): Countable[] {
+  const out: Countable[] = []
+  for (const c of CARDS) {
+    if (c.discount) out.push(c.discount.what)
+    for (const fx of c.onBuy ?? []) {
+      if ('what' in fx) out.push(fx.what)
+    }
+    for (const s of c.scroll ?? []) {
+      if ('what' in s) out.push(s.what)
+    }
+  }
+  return out
+}
 
-  it('has 8/6/4 cards per gem per tier', () => {
-    for (const gem of GEMS) {
-      expect(CARDS.filter((c) => c.tier === 1 && c.gem === gem).length).toBe(8)
-      expect(CARDS.filter((c) => c.tier === 2 && c.gem === gem).length).toBe(6)
-      expect(CARDS.filter((c) => c.tier === 3 && c.gem === gem).length).toBe(4)
+describe('card catalog', () => {
+  it('has unique, deck-banded ids (castle < 100 ≤ village)', () => {
+    expect(new Set(CARDS.map((c) => c.id)).size).toBe(CARDS.length)
+    for (const c of CARDS) {
+      if (c.deck === 'castle') expect(c.id).toBeLessThan(100)
+      else expect(c.id).toBeGreaterThanOrEqual(100)
     }
   })
 
-  it('keeps points inside the official per-tier ranges', () => {
-    const range = { 1: [0, 1], 2: [1, 3], 3: [3, 5] } as const
-    for (const c of CARDS) {
-      expect(c.points).toBeGreaterThanOrEqual(range[c.tier][0])
-      expect(c.points).toBeLessThanOrEqual(range[c.tier][1])
-    }
+  it('both decks are dealable (≥ 12 cards each) and evenly represented', () => {
+    expect(cardsOfDeck('castle').length).toBeGreaterThanOrEqual(12)
+    expect(cardsOfDeck('village').length).toBeGreaterThanOrEqual(12)
+    expect(cardsOfDeck('castle').length + cardsOfDeck('village').length).toBe(CARDS.length)
   })
 
-  it('matches the official per-tier point totals', () => {
-    const total = (tier: number) =>
-      CARDS.filter((c) => c.tier === tier).reduce((s, c) => s + c.points, 0)
-    expect(total(1)).toBe(5)
-    expect(total(2)).toBe(55)
-    expect(total(3)).toBe(80)
-  })
-
-  it('has sane costs: 1..7 per color, at least one color', () => {
+  it('every card is well-formed', () => {
     for (const c of CARDS) {
-      const entries = Object.entries(c.cost)
-      expect(entries.length).toBeGreaterThan(0)
-      for (const [, n] of entries) {
-        expect(n).toBeGreaterThanOrEqual(1)
-        expect(n).toBeLessThanOrEqual(7)
+      expect(c.cost).toBeGreaterThanOrEqual(0)
+      expect(c.name.length).toBeGreaterThan(0)
+      for (const s of c.shields) expect(SHIELDS).toContain(s)
+      if (c.messenger) expect(['castle', 'village']).toContain(c.messenger)
+      if (c.purse !== undefined) {
+        expect(c.purse).toBeGreaterThan(0)
+        // a purse must be scored by a goldOnThisPurse scroll entry
+        expect(
+          (c.scroll ?? []).some((s) => s.kind === 'per' && s.what.count === 'goldOnThisPurse'),
+        ).toBe(true)
       }
+      // goldOnThisPurse never appears on purseless cards
+      if (c.purse === undefined) {
+        expect(
+          (c.scroll ?? []).some((s) => 'what' in s && s.what.count === 'goldOnThisPurse'),
+        ).toBe(false)
+      }
+      // discounts evaluate pre-placement: only the grid scope is meaningful
+      if (c.discount) expect(c.discount.where).toBe('grid')
     }
   })
-})
 
-describe('noble data', () => {
-  it('has 10 nobles with unique ids', () => {
-    expect(NOBLES.length).toBe(10)
-    expect(new Set(NOBLES.map((n) => n.id)).size).toBe(10)
+  it('cardById covers the catalog', () => {
+    for (const c of CARDS) expect(cardById.get(c.id)).toBe(c)
   })
 
-  it('follows the official pattern: five 3+3+3 and five 4+4', () => {
-    const triple = NOBLES.filter((n) => Object.values(n.req).every((v) => v === 3))
-    const pair = NOBLES.filter((n) => Object.values(n.req).every((v) => v === 4))
-    expect(triple.length).toBe(5)
-    expect(pair.length).toBe(5)
-    for (const n of triple) expect(Object.keys(n.req).length).toBe(3)
-    for (const n of pair) expect(Object.keys(n.req).length).toBe(2)
-  })
-
-  it('covers every gem evenly (17 required tokens per color overall)', () => {
-    for (const gem of GEMS) {
-      const total = NOBLES.reduce((s, n) => s + (n.req[gem as Gem] ?? 0), 0)
-      expect(total).toBe(17)
+  it('exercises every effect, scoring and countable kind at least once', () => {
+    const effectKinds = new Set<Effect['kind']>()
+    const scoringKinds = new Set<Scoring['kind']>()
+    for (const c of CARDS) {
+      for (const fx of c.onBuy ?? []) effectKinds.add(fx.kind)
+      for (const s of c.scroll ?? []) scoringKinds.add(s.kind)
     }
+    for (const k of ['gold', 'keys', 'goldPer', 'eachOpponentGold', 'goldPerOpponent'] as const) {
+      expect(effectKinds, `effect kind ${k}`).toContain(k)
+    }
+    for (const k of ['flat', 'per', 'position', 'threshold'] as const) {
+      expect(scoringKinds, `scoring kind ${k}`).toContain(k)
+    }
+    const countKinds = new Set(countables().map((c) => c.count))
+    for (const k of ['shields', 'cards', 'keys', 'goldOnThisPurse', 'shieldSets'] as const) {
+      expect(countKinds, `countable kind ${k}`).toContain(k)
+    }
+  })
+
+  it('some cards carry messenger icons in both directions', () => {
+    expect(CARDS.some((c) => c.messenger === 'castle')).toBe(true)
+    expect(CARDS.some((c) => c.messenger === 'village')).toBe(true)
   })
 })

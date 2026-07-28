@@ -1,77 +1,60 @@
 import { describe, expect, it } from 'vitest'
-import { GOLD_COUNT, SCALING } from '../src/data'
-import {
-  applyMove,
-  bagTotal,
-  createGame,
-  GEMS,
-  legalMoves,
-  mulberry32,
-  publicHash,
-  TOKEN_CAP,
-} from '../src/engine'
-import type { GameState, Move, Seat } from '../src/engine'
+import { CARDS } from '../src/data'
+import { applyMove, createGame, legalMoves, mulberry32, publicHash, KINGDOM_CARDS } from '../src/engine'
+import type { GameState, Move } from '../src/engine'
 import { makeConfig } from './helpers'
 
-const MOVE_CAP = 4000
+/**
+ * Random playouts: the game always terminates, the turn holder always has a
+ * legal move, the log replays identically, and cards are conserved.
+ */
 
-function assertInvariants(state: GameState, playerCount: 2 | 3 | 4): void {
-  // token conservation, per color
-  for (const g of GEMS) {
-    const total = state.bank[g] + state.players.reduce((s, p) => s + p.tokens[g], 0)
-    expect(total).toBe(SCALING[playerCount].tokens)
-  }
-  const gold = state.bank.gold + state.players.reduce((s, p) => s + p.tokens.gold, 0)
-  expect(gold).toBe(GOLD_COUNT)
-
-  // card conservation: every one of the 90 ids in exactly one place
-  const ids = [
-    ...state.decks.flat(),
-    ...state.market.flat().filter((id): id is number => id !== null),
-    ...state.players.flatMap((p) => [...p.reserved.map((r) => r.card), ...p.cards]),
-  ]
-  expect(ids.length).toBe(90)
-  expect(new Set(ids).size).toBe(90)
-
-  for (const p of state.players) {
-    expect(p.reserved.length).toBeLessThanOrEqual(3)
-    if (state.pending?.kind !== 'returnTokens') {
-      expect(bagTotal(p.tokens)).toBeLessThanOrEqual(TOKEN_CAP)
-    }
-  }
-}
-
-/** Random but purchase-biased policy so games actually reach 15 prestige. */
-function pickMove(moves: Move[], rng: () => number): Move {
-  const purchases = moves.filter((m) => m.type === 'purchase')
-  const pool = purchases.length > 0 && rng() < 0.7 ? purchases : moves
-  return pool[Math.floor(rng() * pool.length)]
+function conservation(state: GameState): number {
+  return (
+    state.decks.castle.length +
+    state.decks.village.length +
+    state.discard.castle.length +
+    state.discard.village.length +
+    state.rows.castle.filter((c) => c !== null).length +
+    state.rows.village.filter((c) => c !== null).length +
+    state.players.reduce((n, p) => n + p.placed.length, 0)
+  )
 }
 
 describe('random playouts', () => {
   for (const playerCount of [2, 3, 4] as const) {
-    for (const seed of [1, 2, 3, 4, 5]) {
-      it(`${playerCount}P seed ${seed}: invariants hold, game ends, log replays to the same hash`, () => {
-        const cfg = makeConfig(playerCount, seed)
-        const rng = mulberry32(seed * 7919)
+    for (const seed of [1, 2, 3, 4]) {
+      it(`${playerCount}P seed ${seed}: terminates, stays legal, replays, conserves cards`, () => {
+        const cfg = makeConfig(playerCount, seed * 1000 + playerCount)
+        const rng = mulberry32(seed)
         let state = createGame(cfg)
-        const log: { actor: Seat; move: Move }[] = []
+        const log: { actor: number; move: Move }[] = []
+        // ≤2 moves per turn (key + take), 9 turns per player, plus slack
+        const maxSteps = 2 * KINGDOM_CARDS * playerCount + 8
 
-        for (let i = 0; i < MOVE_CAP && !state.result; i++) {
-          const actor = state.pending?.actor ?? state.turn
-          const moves = legalMoves(state, actor)
-          expect(moves.length).toBeGreaterThan(0) // never soft-locked
-          const move = pickMove(moves, rng)
-          state = applyMove(state, actor, move)
-          log.push({ actor, move })
-          assertInvariants(state, playerCount)
+        let steps = 0
+        while (!state.result) {
+          expect(steps++).toBeLessThan(maxSteps)
+          const moves = legalMoves(state, state.turn)
+          expect(moves.length).toBeGreaterThan(0)
+          const move = moves[Math.floor(rng() * moves.length)]
+          log.push({ actor: state.turn, move })
+          state = applyMove(state, state.turn, move)
+
+          expect(conservation(state)).toBe(CARDS.length)
+          for (const p of state.players) {
+            expect(p.gold).toBeGreaterThanOrEqual(0)
+            expect(p.keys).toBeGreaterThanOrEqual(0)
+            expect(p.placed.length).toBeLessThanOrEqual(KINGDOM_CARDS)
+          }
         }
 
-        expect(state.result).not.toBe(null) // terminated under the cap
-        expect(state.result!.ranking.length).toBe(playerCount)
-        expect(state.result!.winners.length).toBeGreaterThan(0)
+        // equal turns: every kingdom is exactly full
+        for (const p of state.players) expect(p.placed.length).toBe(KINGDOM_CARDS)
+        expect(state.result!.ranking).toHaveLength(playerCount)
+        expect(state.result!.breakdown).toHaveLength(playerCount)
 
-        // replaying the log from the config reproduces the identical state
+        // the log folds back to the identical state on a fresh client
         let replayed = createGame(cfg)
         for (const { actor, move } of log) replayed = applyMove(replayed, actor, move)
         expect(publicHash(replayed)).toBe(publicHash(state))

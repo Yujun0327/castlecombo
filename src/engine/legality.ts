@@ -1,102 +1,72 @@
-import { cardById } from '../data'
-import { autoPayment } from './payments'
-import { GEMS, RESERVE_CAP, TOKEN_COLORS } from './types'
-import type { GameState, Gem, Move, Seat, Tier, TokenBag, TokenColor } from './types'
+import { effectiveCost } from './effects'
+import { GRID_SIDE, KINGDOM_CARDS, otherDeck } from './types'
+import type { GameState, Move, Placement, Seat } from './types'
 
 /**
  * Every move the given seat may legally make. The UI renders only these.
- * Purchases carry the auto-payment; applyMove additionally accepts any
- * valid explicit payment (gold substitution) not enumerated here.
+ * A turn is 0-or-1 `useKey` moves followed by exactly one buy/takeFacedown
+ * (R3.1–R3.2); `keyUsedThisTurn` gates the key.
  */
 export function legalMoves(state: GameState, seat: Seat): Move[] {
   if (state.result) return []
-  const actor = state.pending?.actor ?? state.turn
-  if (seat !== actor) return []
-
-  if (state.pending?.kind === 'returnTokens') {
-    return returnCombos(state.players[seat].tokens, state.pending.excess).map((tokens) => ({
-      type: 'return',
-      tokens,
-    }))
-  }
-  if (state.pending?.kind === 'chooseNoble') {
-    return state.pending.options.map((noble) => ({ type: 'chooseNoble', noble }))
-  }
+  if (seat !== state.turn) return []
 
   const moves: Move[] = []
   const player = state.players[seat]
 
-  // take tokens
-  const nonEmpty = GEMS.filter((g) => state.bank[g] > 0)
-  const takeSize = Math.min(3, nonEmpty.length)
-  if (takeSize > 0) {
-    for (const gems of combinations(nonEmpty, takeSize)) moves.push({ type: 'take', gems })
-  }
-  for (const g of GEMS) {
-    if (state.bank[g] >= 4) moves.push({ type: 'take', gems: [g, g] })
-  }
-
-  // reserve
-  if (player.reserved.length < RESERVE_CAP) {
-    for (let t = 0; t < 3; t++) {
-      for (let s = 0; s < state.market[t].length; s++) {
-        if (state.market[t][s] !== null) {
-          moves.push({ type: 'reserve', from: { tier: (t + 1) as Tier, slot: s } })
-        }
-      }
-      if (state.decks[t].length > 0) {
-        moves.push({ type: 'reserve', from: { deck: (t + 1) as Tier } })
-      }
+  if (!state.keyUsedThisTurn && player.keys > 0) {
+    const other = otherDeck(state.messenger)
+    // switching to a dead row (all slots gone) is pointless and illegal (RL-5)
+    if (state.rows[other].some((c) => c !== null)) moves.push({ type: 'useKey', action: 'switch' })
+    // a redraw needs at least one card to reveal (RL-7)
+    const m = state.messenger
+    if (state.decks[m].length + state.discard[m].length > 0) {
+      moves.push({ type: 'useKey', action: 'refresh' })
     }
   }
 
-  // purchase (face-up market cards and own reserved cards)
-  for (const row of state.market) {
-    for (const id of row) {
-      if (id === null) continue
-      const payment = autoPayment(player, cardById.get(id)!)
-      if (payment) moves.push({ type: 'purchase', from: 'market', card: id, payment })
+  const cells = legalCells(player.placed)
+  state.rows[state.messenger].forEach((card, slot) => {
+    if (card === null) return
+    const affordable = effectiveCost(player.placed, card) <= player.gold
+    for (const { x, y } of cells) {
+      if (affordable) moves.push({ type: 'buy', slot, x, y })
+      moves.push({ type: 'takeFacedown', slot, x, y })
     }
-  }
-  for (const r of player.reserved) {
-    const payment = autoPayment(player, cardById.get(r.card)!)
-    if (payment) moves.push({ type: 'purchase', from: 'reserved', card: r.card, payment })
-  }
+  })
 
-  // pass is the anti-softlock escape hatch: legal only when nothing else is
-  if (moves.length === 0) moves.push({ type: 'pass' })
   return moves
 }
 
-function combinations(items: readonly Gem[], size: number): Gem[][] {
-  if (size === 0) return [[]]
-  const out: Gem[][] = []
-  items.forEach((item, i) => {
-    for (const rest of combinations(items.slice(i + 1), size - 1)) out.push([item, ...rest])
-  })
-  return out
-}
+/**
+ * Cells a new card may occupy: any spot for the first card, then empty
+ * cells orthogonally adjacent to a placement that keep the bounding box
+ * within 3×3 (R4.1–R4.3).
+ */
+export function legalCells(placed: readonly Placement[]): { x: number; y: number }[] {
+  if (placed.length === 0) return [{ x: 0, y: 0 }]
+  if (placed.length >= KINGDOM_CARDS) return []
 
-/** All distinct bags of exactly `count` tokens drawn from `owned`. */
-export function returnCombos(owned: TokenBag, count: number): TokenBag[] {
-  const out: TokenBag[] = []
-  const bag: Partial<Record<TokenColor, number>> = {}
-  const walk = (colorIdx: number, remaining: number) => {
-    if (remaining === 0) {
-      const full = { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0, ...bag }
-      out.push(full)
-      return
-    }
-    if (colorIdx >= TOKEN_COLORS.length) return
-    const c = TOKEN_COLORS[colorIdx]
-    const max = Math.min(owned[c], remaining)
-    for (let n = max; n >= 0; n--) {
-      if (n > 0) bag[c] = n
-      else delete bag[c]
-      walk(colorIdx + 1, remaining - n)
-    }
-    delete bag[c]
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  const occupied = new Set<string>()
+  for (const p of placed) {
+    occupied.add(`${p.x},${p.y}`)
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x)
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y)
   }
-  walk(0, count)
+
+  const out: { x: number; y: number }[] = []
+  const seen = new Set<string>()
+  for (const p of placed) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const x = p.x + dx, y = p.y + dy
+      const key = `${x},${y}`
+      if (occupied.has(key) || seen.has(key)) continue
+      seen.add(key)
+      const w = Math.max(maxX, x) - Math.min(minX, x) + 1
+      const h = Math.max(maxY, y) - Math.min(minY, y) + 1
+      if (w <= GRID_SIDE && h <= GRID_SIDE) out.push({ x, y })
+    }
+  }
   return out
 }

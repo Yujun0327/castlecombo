@@ -1,141 +1,143 @@
-import type { CardDef, Gem, Tier } from '../engine/types'
+import type { CardDef, Deck, Shield } from '../engine/types'
 
 /**
- * All 90 development cards of the official distribution.
- * Shorthand cost keys: w=diamond(white) u=sapphire(blue) g=emerald(green)
- * r=ruby(red) k=onyx(black) — the conventional wUgRk notation.
- * Ids are stable: 0–39 tier 1, 40–69 tier 2, 70–89 tier 3.
+ * PROVISIONAL CATALOG — ruling RL-1.
+ *
+ * A shape- and difficulty-representative stand-in until the real roster is
+ * transcribed and double-sourced (BGG card-list threads + the circulated
+ * "Chateau Combo Card Roster"). Ids are stable: castle 0.., village 100..
+ * Swapping in the real data touches only this file; bump `rulesVersion`.
  */
+export const CARDS_PROVISIONAL = true
 
-interface ShortCost {
-  w?: number
-  u?: number
-  g?: number
-  r?: number
-  k?: number
+const defs: CardDef[] = []
+const nextId: Record<Deck, number> = { castle: 0, village: 100 }
+
+function card(
+  deck: Deck,
+  name: string,
+  cost: number,
+  shields: Shield[],
+  extra: Omit<CardDef, 'id' | 'name' | 'deck' | 'cost' | 'shields'> = {},
+): void {
+  defs.push({ id: nextId[deck]++, name, deck, cost, shields, ...extra })
 }
 
-let nextId = 0
+/* --- castle (grey): nobles, clergy, officials — pricier, positional --- */
 
-function card(tier: Tier, gem: Gem, points: number, c: ShortCost): CardDef {
-  const cost: CardDef['cost'] = {}
-  if (c.w) cost.diamond = c.w
-  if (c.u) cost.sapphire = c.u
-  if (c.g) cost.emerald = c.g
-  if (c.r) cost.ruby = c.r
-  if (c.k) cost.onyx = c.k
-  return { id: nextId++, tier, gem, points, cost }
+card('castle', 'The Queen', 8, ['or', 'gules'], {
+  scroll: [{ kind: 'position', at: 'center', points: 8 }],
+})
+card('castle', 'The Chancellor', 6, ['sable'], {
+  scroll: [{ kind: 'per', points: 2, what: { count: 'shields', shields: ['sable'] }, where: 'grid' }],
+})
+card('castle', 'The Bishop', 5, ['azure'], {
+  messenger: 'village',
+  scroll: [{ kind: 'per', points: 2, what: { count: 'shields', shields: ['azure'] }, where: 'col' }],
+})
+card('castle', 'The Treasurer', 7, ['or'], {
+  purse: 8,
+  scroll: [{ kind: 'per', points: 1, what: { count: 'goldOnThisPurse' }, where: 'grid' }],
+})
+card('castle', 'The Marshal', 6, ['gules', 'gules'], {
+  onBuy: [{ kind: 'goldPer', amount: 2, what: { count: 'shields', shields: ['gules'] }, where: 'grid' }],
+  scroll: [{ kind: 'flat', points: 4 }],
+})
+card('castle', 'The Diplomat', 5, ['argent'], {
+  discount: { amount: 1, what: { count: 'shields', shields: ['argent'] }, where: 'grid' },
+  scroll: [{ kind: 'flat', points: 5 }],
+})
+card('castle', 'The Astronomer', 4, ['vert'], {
+  scroll: [{ kind: 'per', points: 1, what: { count: 'keys' }, where: 'grid' }],
+})
+card('castle', 'The Duchess', 7, ['or', 'argent'], {
+  scroll: [{ kind: 'per', points: 3, what: { count: 'cards', deck: 'castle' }, where: 'row' }],
+})
+card('castle', 'The Judge', 6, ['sable', 'argent'], {
+  scroll: [{ kind: 'threshold', what: { count: 'shields', shields: ['sable'] }, where: 'grid', atLeast: 3, points: 8 }],
+})
+card('castle', 'The Herald', 3, ['azure'], {
+  messenger: 'castle',
+  onBuy: [{ kind: 'keys', amount: 1 }],
+  scroll: [{ kind: 'per', points: 2, what: { count: 'cards', faceDown: true }, where: 'grid' }],
+})
+card('castle', 'The Chamberlain', 5, ['or'], {
+  scroll: [{ kind: 'per', points: 1, what: { count: 'shieldSets' }, where: 'grid' }],
+})
+card('castle', 'The Tax Collector', 4, ['sable'], {
+  onBuy: [
+    { kind: 'eachOpponentGold', amount: -1 },
+    { kind: 'goldPerOpponent', amount: 1 },
+  ],
+  scroll: [{ kind: 'flat', points: 3 }],
+})
+
+/* --- village (brown): tradespeople — cheaper, synergy-driven --- */
+
+card('village', 'The Blacksmith', 4, ['gules'], {
+  onBuy: [{ kind: 'gold', amount: 2 }],
+  scroll: [{ kind: 'per', points: 2, what: { count: 'shields', shields: ['gules'] }, where: 'adjacent' }],
+})
+card('village', 'The Miller', 3, ['vert'], {
+  scroll: [{ kind: 'per', points: 2, what: { count: 'shields', shields: ['vert'] }, where: 'row' }],
+})
+card('village', 'The Innkeeper', 4, ['or'], {
+  purse: 6,
+  scroll: [{ kind: 'per', points: 2, what: { count: 'goldOnThisPurse' }, where: 'grid' }],
+})
+card('village', 'The Beggar', 0, [], {
+  scroll: [{ kind: 'position', at: 'corner', points: 4 }],
+})
+card('village', 'The Carpenter', 3, ['vert'], {
+  messenger: 'castle',
+  scroll: [{ kind: 'per', points: 2, what: { count: 'cards', deck: 'village' }, where: 'col' }],
+})
+card('village', 'The Fishwife', 2, ['azure'], {
+  onBuy: [{ kind: 'keys', amount: 1 }],
+  scroll: [{ kind: 'position', at: 'edge', points: 3 }],
+})
+card('village', 'The Mason', 5, ['sable'], {
+  discount: { amount: 2, what: { count: 'cards', deck: 'castle' }, where: 'grid' },
+  scroll: [{ kind: 'flat', points: 4 }],
+})
+card('village', 'The Shepherd', 2, ['vert', 'vert'], {
+  scroll: [{ kind: 'per', points: 1, what: { count: 'shields', shields: ['vert'] }, where: 'grid' }],
+})
+card('village', 'The Moneylender', 6, ['or', 'sable'], {
+  purse: 10,
+  scroll: [{ kind: 'per', points: 1, what: { count: 'goldOnThisPurse' }, where: 'grid' }],
+})
+card('village', 'The Gravedigger', 1, ['sable'], {
+  scroll: [{ kind: 'per', points: 3, what: { count: 'cards', faceDown: true }, where: 'adjacent' }],
+})
+card('village', 'The Weaver', 3, ['argent'], {
+  scroll: [{ kind: 'threshold', what: { count: 'cards', hasPurse: true }, where: 'grid', atLeast: 2, points: 6 }],
+})
+card('village', 'The Smuggler', 4, ['sable', 'azure'], {
+  messenger: 'village',
+  onBuy: [{ kind: 'goldPer', amount: 1, what: { count: 'cards', faceDown: true }, where: 'grid' }],
+  scroll: [{ kind: 'flat', points: 2 }],
+})
+
+/* --- pad each deck to a plausible size with simple variations --- */
+
+const FILLER_SHIELDS: Shield[][] = [['gules'], ['azure'], ['vert'], ['or'], ['sable'], ['argent']]
+for (const deck of ['castle', 'village'] as const) {
+  const base = deck === 'castle' ? 4 : 2
+  for (let i = 0; defs.filter((c) => c.deck === deck).length < 30; i++) {
+    const shields = FILLER_SHIELDS[i % FILLER_SHIELDS.length]
+    card(deck, `${deck === 'castle' ? 'Courtier' : 'Villager'} ${i + 1}`, base + (i % 4), shields, {
+      ...(i % 5 === 0 ? { messenger: (deck === 'castle' ? 'village' : 'castle') as Deck } : {}),
+      scroll: [
+        {
+          kind: 'per',
+          points: 2,
+          what: { count: 'shields', shields },
+          where: (['grid', 'row', 'col', 'adjacent'] as const)[i % 4],
+        },
+      ],
+    })
+  }
 }
 
-export const CARDS: readonly CardDef[] = [
-  /* ---------------- tier 1 (40) ---------------- */
-  // onyx (black)
-  card(1, 'onyx', 0, { w: 1, u: 1, g: 1, r: 1 }),
-  card(1, 'onyx', 0, { w: 1, u: 2, g: 1, r: 1 }),
-  card(1, 'onyx', 0, { w: 2, u: 2, r: 1 }),
-  card(1, 'onyx', 0, { g: 1, r: 3, k: 1 }),
-  card(1, 'onyx', 0, { g: 2, r: 1 }),
-  card(1, 'onyx', 0, { w: 2, g: 2 }),
-  card(1, 'onyx', 0, { g: 3 }),
-  card(1, 'onyx', 1, { u: 4 }),
-  // sapphire (blue)
-  card(1, 'sapphire', 0, { w: 1, g: 1, r: 1, k: 1 }),
-  card(1, 'sapphire', 0, { w: 1, g: 1, r: 2, k: 1 }),
-  card(1, 'sapphire', 0, { w: 1, g: 2, r: 2 }),
-  card(1, 'sapphire', 0, { u: 1, g: 3, r: 1 }),
-  card(1, 'sapphire', 0, { w: 1, k: 2 }),
-  card(1, 'sapphire', 0, { g: 2, k: 2 }),
-  card(1, 'sapphire', 0, { k: 3 }),
-  card(1, 'sapphire', 1, { r: 4 }),
-  // diamond (white)
-  card(1, 'diamond', 0, { u: 1, g: 1, r: 1, k: 1 }),
-  card(1, 'diamond', 0, { u: 1, g: 2, r: 1, k: 1 }),
-  card(1, 'diamond', 0, { u: 2, g: 2, k: 1 }),
-  card(1, 'diamond', 0, { w: 3, u: 1, k: 1 }),
-  card(1, 'diamond', 0, { r: 2, k: 1 }),
-  card(1, 'diamond', 0, { u: 2, k: 2 }),
-  card(1, 'diamond', 0, { u: 3 }),
-  card(1, 'diamond', 1, { g: 4 }),
-  // emerald (green)
-  card(1, 'emerald', 0, { w: 1, u: 1, r: 1, k: 1 }),
-  card(1, 'emerald', 0, { w: 1, u: 1, r: 1, k: 2 }),
-  card(1, 'emerald', 0, { u: 1, r: 2, k: 2 }),
-  card(1, 'emerald', 0, { w: 1, u: 3, g: 1 }),
-  card(1, 'emerald', 0, { w: 2, u: 1 }),
-  card(1, 'emerald', 0, { u: 2, r: 2 }),
-  card(1, 'emerald', 0, { r: 3 }),
-  card(1, 'emerald', 1, { k: 4 }),
-  // ruby (red)
-  card(1, 'ruby', 0, { w: 1, u: 1, g: 1, k: 1 }),
-  card(1, 'ruby', 0, { w: 2, u: 1, g: 1, k: 1 }),
-  card(1, 'ruby', 0, { w: 2, g: 1, k: 2 }),
-  card(1, 'ruby', 0, { w: 1, r: 1, k: 3 }),
-  card(1, 'ruby', 0, { u: 2, g: 1 }),
-  card(1, 'ruby', 0, { w: 2, r: 2 }),
-  card(1, 'ruby', 0, { w: 3 }),
-  card(1, 'ruby', 1, { w: 4 }),
-
-  /* ---------------- tier 2 (30) ---------------- */
-  // onyx
-  card(2, 'onyx', 1, { w: 3, u: 2, g: 2 }),
-  card(2, 'onyx', 1, { w: 3, g: 3, k: 2 }),
-  card(2, 'onyx', 2, { u: 1, g: 4, r: 2 }),
-  card(2, 'onyx', 2, { g: 5, r: 3 }),
-  card(2, 'onyx', 2, { w: 5 }),
-  card(2, 'onyx', 3, { k: 6 }),
-  // sapphire
-  card(2, 'sapphire', 1, { u: 2, g: 2, r: 3 }),
-  card(2, 'sapphire', 1, { u: 2, g: 3, k: 3 }),
-  card(2, 'sapphire', 2, { w: 5, u: 3 }),
-  card(2, 'sapphire', 2, { w: 2, r: 1, k: 4 }),
-  card(2, 'sapphire', 2, { u: 5 }),
-  card(2, 'sapphire', 3, { u: 6 }),
-  // diamond
-  card(2, 'diamond', 1, { g: 3, r: 2, k: 2 }),
-  card(2, 'diamond', 1, { w: 2, u: 3, r: 3 }),
-  card(2, 'diamond', 2, { g: 1, r: 4, k: 2 }),
-  card(2, 'diamond', 2, { r: 5, k: 3 }),
-  card(2, 'diamond', 2, { r: 5 }),
-  card(2, 'diamond', 3, { w: 6 }),
-  // emerald
-  card(2, 'emerald', 1, { w: 3, g: 2, r: 3 }),
-  card(2, 'emerald', 1, { w: 2, u: 3, k: 2 }),
-  card(2, 'emerald', 2, { w: 4, u: 2, k: 1 }),
-  card(2, 'emerald', 2, { u: 5, g: 3 }),
-  card(2, 'emerald', 2, { g: 5 }),
-  card(2, 'emerald', 3, { g: 6 }),
-  // ruby
-  card(2, 'ruby', 1, { w: 2, r: 2, k: 3 }),
-  card(2, 'ruby', 1, { u: 3, r: 2, k: 3 }),
-  card(2, 'ruby', 2, { w: 1, u: 4, g: 2 }),
-  card(2, 'ruby', 2, { w: 3, k: 5 }),
-  card(2, 'ruby', 2, { k: 5 }),
-  card(2, 'ruby', 3, { r: 6 }),
-
-  /* ---------------- tier 3 (20) ---------------- */
-  // onyx
-  card(3, 'onyx', 3, { w: 3, u: 3, g: 5, r: 3 }),
-  card(3, 'onyx', 4, { r: 7 }),
-  card(3, 'onyx', 4, { g: 3, r: 6, k: 3 }),
-  card(3, 'onyx', 5, { r: 7, k: 3 }),
-  // sapphire
-  card(3, 'sapphire', 3, { w: 3, g: 3, r: 3, k: 5 }),
-  card(3, 'sapphire', 4, { w: 7 }),
-  card(3, 'sapphire', 4, { w: 6, u: 3, k: 3 }),
-  card(3, 'sapphire', 5, { w: 7, u: 3 }),
-  // diamond
-  card(3, 'diamond', 3, { u: 3, g: 3, r: 5, k: 3 }),
-  card(3, 'diamond', 4, { k: 7 }),
-  card(3, 'diamond', 4, { w: 3, r: 3, k: 6 }),
-  card(3, 'diamond', 5, { w: 3, k: 7 }),
-  // emerald
-  card(3, 'emerald', 3, { w: 5, u: 3, r: 3, k: 3 }),
-  card(3, 'emerald', 4, { u: 7 }),
-  card(3, 'emerald', 4, { w: 3, u: 6, g: 3 }),
-  card(3, 'emerald', 5, { u: 7, g: 3 }),
-  // ruby
-  card(3, 'ruby', 3, { w: 3, u: 5, g: 3, k: 3 }),
-  card(3, 'ruby', 4, { g: 7 }),
-  card(3, 'ruby', 4, { u: 3, g: 6, r: 3 }),
-  card(3, 'ruby', 5, { g: 7, r: 3 }),
-]
+export const CARDS: readonly CardDef[] = defs

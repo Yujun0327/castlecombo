@@ -1,57 +1,34 @@
-import type { Gem, Move, Tier } from '../engine'
-
-/** What the card action sheet was opened on. */
-export type SheetTarget =
-  | { kind: 'market'; tier: Tier; slot: number; card: number }
-  | { kind: 'reserved'; card: number }
-  | { kind: 'deck'; tier: Tier }
-
-/** Multiset containment: every element of `sub` fits inside `sup`. */
-function subMultiset(sub: readonly Gem[], sup: readonly Gem[]): boolean {
-  const counts = new Map<Gem, number>()
-  for (const g of sup) counts.set(g, (counts.get(g) ?? 0) + 1)
-  for (const g of sub) {
-    const left = (counts.get(g) ?? 0) - 1
-    if (left < 0) return false
-    counts.set(g, left)
-  }
-  return true
-}
-
-function sameMultiset(a: readonly Gem[], b: readonly Gem[]): boolean {
-  return a.length === b.length && subMultiset(a, b)
-}
-
-function takeMoves(moves: readonly Move[]): Gem[][] {
-  return moves.filter((m) => m.type === 'take').map((m) => m.gems)
-}
-
-/** Could tapping `gem` grow the current selection toward a legal take? */
-export function canAddGem(selection: readonly Gem[], gem: Gem, moves: readonly Move[]): boolean {
-  const next = [...selection, gem]
-  return takeMoves(moves).some((t) => subMultiset(next, t))
-}
+import type { Move } from '../engine'
 
 /**
- * Selection state machine for tapping bank chips:
- * tap an unselected gem → add it (if any legal take allows);
- * tap the sole selected gem → grow to the 2-of-a-kind take if legal, else clear;
- * tap an already-selected gem otherwise → remove one of it.
+ * Buy-flow selection: tap a market card (sheet opens) → choose Recruit or
+ * Take-face-down (placing starts) → tap a highlighted cell (move dispatches).
+ * Pure functions, zero DOM coupling.
  */
-export function tapGem(selection: readonly Gem[], gem: Gem, moves: readonly Move[]): Gem[] {
-  if (selection.includes(gem)) {
-    if (selection.length === 1 && canAddGem(selection, gem, moves)) return [gem, gem]
-    const idx = selection.lastIndexOf(gem)
-    return selection.filter((_, i) => i !== idx)
-  }
-  if (canAddGem(selection, gem, moves)) return [...selection, gem]
-  return [...selection]
+export type Selection =
+  | { kind: 'none' }
+  | { kind: 'sheet'; slot: number }
+  | { kind: 'placing'; slot: number; mode: 'buy' | 'takeFacedown' }
+
+export const NO_SELECTION: Selection = { kind: 'none' }
+
+/** Cells the current selection may be placed on, from the legal-move list. */
+export function targetCells(sel: Selection, moves: readonly Move[]): { x: number; y: number }[] {
+  if (sel.kind !== 'placing') return []
+  return moves
+    .filter((m) => m.type === sel.mode && m.slot === sel.slot)
+    .map((m) => ({ x: (m as Move & { x: number }).x, y: (m as Move & { y: number }).y }))
 }
 
-/** The legal take move exactly matching the selection, if any. */
-export function selectionMove(selection: readonly Gem[], moves: readonly Move[]): Move | null {
-  if (selection.length === 0) return null
+/** The dispatchable move for tapping (x,y) under the current selection, if legal. */
+export function cellMove(sel: Selection, x: number, y: number, moves: readonly Move[]): Move | null {
+  if (sel.kind !== 'placing') return null
   return (
-    moves.find((m) => m.type === 'take' && sameMultiset(selection, m.gems)) ?? null
+    moves.find((m) => m.type === sel.mode && m.slot === sel.slot && m.x === x && m.y === y) ?? null
   )
+}
+
+/** May the sheet offer "Recruit" (i.e. is a buy of this slot affordable)? */
+export function canBuy(slot: number, moves: readonly Move[]): boolean {
+  return moves.some((m) => m.type === 'buy' && m.slot === slot)
 }
