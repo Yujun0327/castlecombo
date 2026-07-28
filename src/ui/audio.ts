@@ -78,29 +78,24 @@ export function play(sfx: SfxEvent | 'select' | 'error'): void {
       case 'error':
         tone(180, { dur: 0.18, vol: 0.12, type: 'sawtooth', glide: -60 })
         return
-      case 'take':
+      case 'key':
+        // a key turning: two dry clicks, the second lower
+        clink({ vol: 0.6 })
+        tone(320, { t: 0.09, dur: 0.06, vol: 0.12, type: 'square' })
+        return
+      case 'buy':
+        // parchment slide, then the entry lands with a soft stamp
+        slide()
+        tone(660, { t: 0.14, dur: 0.1, vol: 0.1, type: 'triangle' })
+        return
+      case 'facedown':
+        // card flipped over: muffled slide, coins follow via the coins event
+        slide({ t: 0, vol: 0.6 })
+        return
+      case 'coins':
         clink()
         clink({ t: 0.07, vol: 0.8 })
         clink({ t: 0.13, vol: 0.6 })
-        return
-      case 'return':
-        clink({ vol: 0.6 })
-        clink({ t: 0.08, vol: 0.45 })
-        return
-      case 'reserve':
-        slide()
-        clink({ t: 0.12, vol: 0.7 }) // the gold joker lands
-        return
-      case 'purchase':
-        clink({ vol: 0.7 })
-        slide({ t: 0.08 })
-        tone(660, { t: 0.14, dur: 0.1, vol: 0.1, type: 'triangle' })
-        return
-      case 'noble':
-        // a small engraved chime: major third bell
-        tone(988, { dur: 0.4, vol: 0.12, type: 'sine' })
-        tone(1245, { t: 0.1, dur: 0.5, vol: 0.1, type: 'sine' })
-        tone(1976, { t: 0.1, dur: 0.3, vol: 0.05, type: 'sine' })
         return
       case 'win':
         for (const [i, f] of [523, 659, 784, 1047].entries())

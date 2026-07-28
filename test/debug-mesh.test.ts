@@ -45,7 +45,8 @@ describe('debug', () => {
     }
     const first = sessions.find((s) => s.myTurn)!
     console.log('first seat', first.seat)
-    first.submit(first.myMoves()[0])
+    // a turn-ending take (useKey would keep the turn on the same seat)
+    first.submit(first.myMoves().find((m) => m.type !== 'useKey')!)
     mesh.flush()
     console.log('deliveries:', seen.join(' | '))
     console.log('hashes', sessions.map((s) => publicHash(s.state)))

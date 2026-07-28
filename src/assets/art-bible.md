@@ -39,21 +39,22 @@ Card frames identify the deck at a glance, desaturated to sit on parchment:
 | castle (grey) | `#7E8595` | `#99A0AE` | `#636A79` |
 | village (brown) | `#8A6748` | `#A17E5C` | `#6E4F35` |
 
-## Heraldic tinctures (shield/coat-of-arms colors)
+## Heraldic shield colors (the six real types — load-bearing)
 
-Muted manuscript versions of the game's shield types; hue readable at a glance.
-Exact set pinned after roster transcription (see rulings RL-1); placeholder scale:
+The real game's six shield types, in muted manuscript versions matching the
+physical cards' hues; readable at a glance. The Faith plum is a FUNCTIONAL color
+like the rest — the anti-slop "no purple" rule bans decorative purple, not this.
 
-| Tincture | base | hi | lo |
-|---|---|---|---|
-| gules (red) | `#A9553F` | `#C06E56` | `#87422F` |
-| azure (blue) | `#5F87A8` | `#7BA0BE` | `#48708E` |
-| vert (green) | `#5C7A4A` | `#749260` | `#465F38` |
-| or (gold) | `#C9A94E` | `#DBBF6B` | `#A8893B` |
-| sable (black) | `#4A4238` | `#5F564A` | `#352F27` |
-| argent (white) | `#D8CFBA` | `#E7E0CF` | `#BFB59D` |
+| Shield | base | hi | lo | charge glyph |
+|---|---|---|---|---|
+| noble (blue) | `#5F87A8` | `#7BA0BE` | `#48708E` | crown |
+| faith (plum) | `#7E5A78` | `#987291` | `#64465F` | cross |
+| scholar (green) | `#5C7A4A` | `#749260` | `#465F38` | open book |
+| crafts (orange) | `#B97B3F` | `#CE9459` | `#9A6230` | hammer |
+| peasant (yellow) | `#C9A94E` | `#DBBF6B` | `#A8893B` | wheat sheaf |
+| military (red) | `#A9553F` | `#C06E56` | `#87422F` | sword |
 
-Shields are never color-only: each tincture pairs with a distinct charge glyph
+Shields are never color-only: each type pairs with its charge glyph
 (2px ink line) so color-blind players read the shape.
 
 ## Line

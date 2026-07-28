@@ -1,7 +1,7 @@
 export * from './types'
 export { applyMove } from './apply'
 export { deepClone } from './clone'
-export { countMatches, effectiveCost, resolveEffects } from './effects'
+export { buyRequirements, countMatches, effectiveCost, purseRate, resolveEffects } from './effects'
 export { publicHash } from './hash'
 export { legalCells, legalMoves } from './legality'
 export { mulberry32, seededShuffle } from './rng'

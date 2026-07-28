@@ -5,12 +5,9 @@ export const DECKS: readonly Deck[] = ['castle', 'village']
 /** Seat index, 0..playerCount-1. Turn order is seat order. */
 export type Seat = number
 
-/**
- * Heraldic shield (coat-of-arms) types. Placeholder tincture names until the
- * roster transcription pins the real set (rulings RL-1).
- */
-export type Shield = 'gules' | 'azure' | 'vert' | 'or' | 'sable' | 'argent'
-export const SHIELDS: readonly Shield[] = ['gules', 'azure', 'vert', 'or', 'sable', 'argent']
+/** The six heraldic shield types of the real game (RL-1 transcription). */
+export type Shield = 'noble' | 'faith' | 'scholar' | 'crafts' | 'peasant' | 'military'
+export const SHIELDS: readonly Shield[] = ['noble', 'faith', 'scholar', 'crafts', 'peasant', 'military']
 
 export const START_GOLD = 15
 export const START_KEYS = 2
@@ -24,42 +21,87 @@ export const KINGDOM_CARDS = GRID_SIDE * GRID_SIDE
 export const ROW_SLOTS = 3
 /** Each leftover key scores this at game end. */
 export const KEY_POINTS = 1
+/** Provisional uniform purse capacity (ruling RL-11). */
+export const PURSE_CAP = 5
 
 /* ------------------------------------------------------------------ */
 /* card definition DSL                                                 */
 /* ------------------------------------------------------------------ */
 
 /** Scope a countable is evaluated over, relative to the scoring/bought card. */
-export type Where = 'grid' | 'row' | 'col' | 'adjacent'
+export type Where = 'grid' | 'row' | 'col' | 'rowcol' | 'adjacent'
 
 export type Countable =
   /** Matching shields on face-up cards in scope. */
   | { count: 'shields'; shields: readonly Shield[] }
-  /** Cards in scope passing every given filter (face-down cards match unless excluded — RL-2). */
-  | { count: 'cards'; deck?: Deck; faceDown?: boolean; hasPurse?: boolean; costAtLeast?: number }
+  /** Cards in scope passing every given filter (face-down cards match only bare/faceDown filters — RL-2). */
+  | {
+      count: 'cards'
+      deck?: Deck
+      faceDown?: boolean
+      cost?: number
+      costAtLeast?: number
+      shieldCount?: 1 | 2
+      hasBanner?: boolean
+      hasPurse?: boolean
+    }
   /** The owner's current keys. */
   | { count: 'keys' }
-  /** Gold assigned to this card's purse at end-game scoring. */
+  /** Gold sitting on this card's purse. */
   | { count: 'goldOnThisPurse' }
-  /** Complete sets of all shield types in scope (min count across types). */
-  | { count: 'shieldSets' }
+  /** Gold sitting on every purse in scope. */
+  | { count: 'goldOnPurses' }
+  /** Distinct shield types present in scope. */
+  | { count: 'shieldTypes' }
+  /** Shield types absent from scope (of the 6). */
+  | { count: 'missingShieldTypes' }
+  /** Complete sets across the listed types: min over each type's count. */
+  | { count: 'sets'; shields: readonly Shield[] }
+  /** Sets of 3 of the same shield: sum over types of floor(count/3). */
+  | { count: 'sameShieldTriplets' }
+  /** Pairs of one castle + one village card: min of the two counts. */
+  | { count: 'deckPairs' }
+  /** Empty kingdom cells after this placement (9 − cards placed). */
+  | { count: 'emptySpaces' }
 
-/** Immediate effects, resolved on buy in printed order. No player choices (R5.4). */
+/**
+ * Immediate effects, resolved on buy in printed order. Player decisions are
+ * carried on the buy move itself (`choice`, `discardSlot`) — the reducer
+ * stays choice-free and log-replayable.
+ */
 export type Effect =
   | { kind: 'gold'; amount: number }
   | { kind: 'keys'; amount: number }
   | { kind: 'goldPer'; amount: number; what: Countable; where: Where }
-  /** Every opponent gains (or, negative, loses — floored at 0) gold. */
+  | { kind: 'keysPer'; amount: number; what: Countable; where: Where }
+  /** Counted over a neighbouring opponent's kingdom — the better one (RL-9). */
+  | { kind: 'oppGoldPer'; amount: number; what: Countable }
+  | { kind: 'oppKeysPer'; amount: number; what: Countable }
   | { kind: 'eachOpponentGold'; amount: number }
-  | { kind: 'goldPerOpponent'; amount: number }
+  | { kind: 'eachOpponentKeys'; amount: number }
+  /** Either/or printed choice; `move.choice` picks the branch. */
+  | { kind: 'choice'; a: readonly Effect[]; b: readonly Effect[] }
+  /** Add up to N gold from the supply onto each of your purses with room. */
+  | { kind: 'fillPurses'; amount: number }
+  /** Fill your two best purses to capacity from the supply. */
+  | { kind: 'fillTwoPurses' }
+  /** Discard the card at `move.discardSlot` from the given row; gain its printed cost. */
+  | { kind: 'discardRow'; row: Deck; gain: 'gold' | 'keys' }
 
 /** End-game scroll conditions, summed per card. */
 export type Scoring =
   | { kind: 'flat'; points: number }
-  | { kind: 'per'; points: number; what: Countable; where: Where; cap?: number }
+  /** points × ⌊count / each⌋ (each defaults to 1), capped after grouping. */
+  | { kind: 'per'; points: number; what: Countable; where: Where; cap?: number; each?: number }
   /** Evaluated on the normalized 3×3 grid (R6.4). */
-  | { kind: 'position'; at: 'center' | 'corner' | 'edge'; points: number }
+  | {
+      kind: 'position'
+      at: 'top' | 'bottom' | 'left' | 'right' | 'middleRow' | 'middleCol' | 'corner' | 'edge' | 'center'
+      points: number
+    }
   | { kind: 'threshold'; what: Countable; where: Where; atLeast: number; points: number }
+  /** All-or-nothing: points only when the countable is zero in scope. */
+  | { kind: 'absent'; what: Countable; where: Where; points: number }
 
 export interface CardDef {
   id: number
@@ -67,12 +109,12 @@ export interface CardDef {
   deck: Deck
   cost: number
   shields: readonly Shield[]
-  /** After this card is taken (even face-down, RL-8), the messenger moves here. */
-  messenger?: Deck
-  /** End-game gold capacity; scored via a goldOnThisPurse scroll entry. */
-  purse?: number
-  /** Printed discount: cost is reduced by amount per match already in the kingdom (RL-4). */
-  discount?: { amount: number; what: Countable; where: Where }
+  /** Moves the messenger to the OTHER row when taken — even face-down (RL-8, RL-12). */
+  messenger?: boolean
+  /** Carries a purse (gold stored here scores; capacity PURSE_CAP — RL-11). */
+  purse?: boolean
+  /** Cumulative "-1" discount banner for future purchases of the given scope (RL-4). */
+  banner?: 'all' | Deck
   onBuy?: readonly Effect[]
   scroll?: readonly Scoring[]
 }
@@ -87,6 +129,8 @@ export interface Placement {
   x: number
   y: number
   faceDown: boolean
+  /** Gold locked on this card's purse during play (unspendable). */
+  purseGold: number
 }
 
 export interface PlayerState {
@@ -99,7 +143,7 @@ export interface PlayerState {
 export interface ScoreCardLine {
   card: number
   points: number
-  /** Gold assigned to this card's purse (RL-3). */
+  /** Total gold on this card's purse after the end-game top-up (RL-3). */
   purseGold: number
 }
 
@@ -139,8 +183,12 @@ export interface GameConfig {
 export type Move =
   /** Optional, max once per turn, before the take (R3.1). */
   | { type: 'useKey'; action: 'switch' | 'refresh' }
-  /** Buy the card in the messenger row's slot and place it at (x,y). */
-  | { type: 'buy'; slot: number; x: number; y: number }
+  /**
+   * Buy the card in the messenger row's slot and place it at (x,y).
+   * `choice` answers an either/or effect; `discardSlot` answers a
+   * discard-a-row-card effect. Present exactly when the card demands them.
+   */
+  | { type: 'buy'; slot: number; x: number; y: number; choice?: 'a' | 'b'; discardSlot?: number }
   /** Take that card face-down instead: +6 gold +2 keys, scores nothing. */
   | { type: 'takeFacedown'; slot: number; x: number; y: number }
 

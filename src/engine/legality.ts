@@ -1,11 +1,12 @@
-import { effectiveCost } from './effects'
+import { buyRequirements, effectiveCost } from './effects'
 import { GRID_SIDE, KINGDOM_CARDS, otherDeck } from './types'
 import type { GameState, Move, Placement, Seat } from './types'
 
 /**
  * Every move the given seat may legally make. The UI renders only these.
  * A turn is 0-or-1 `useKey` moves followed by exactly one buy/takeFacedown
- * (R3.1–R3.2); `keyUsedThisTurn` gates the key.
+ * (R3.1–R3.2); `keyUsedThisTurn` gates the key. Cards whose effects demand
+ * a decision fan out into one move per option (choice / discardSlot).
  */
 export function legalMoves(state: GameState, seat: Seat): Move[] {
   if (state.result) return []
@@ -29,8 +30,33 @@ export function legalMoves(state: GameState, seat: Seat): Move[] {
   state.rows[state.messenger].forEach((card, slot) => {
     if (card === null) return
     const affordable = effectiveCost(player.placed, card) <= player.gold
+
+    // decision fan-out: either/or branches × discardable slots
+    const req = buyRequirements(card)
+    const choices: ('a' | 'b' | undefined)[] = req.choice ? ['a', 'b'] : [undefined]
+    let discards: (number | undefined)[] = [undefined]
+    if (req.discardRow) {
+      const open = state.rows[req.discardRow]
+        .map((c, i) => (c !== null ? i : null))
+        .filter((i): i is number => i !== null)
+      if (open.length > 0) discards = open
+    }
+
     for (const { x, y } of cells) {
-      if (affordable) moves.push({ type: 'buy', slot, x, y })
+      if (affordable) {
+        for (const choice of choices) {
+          for (const discardSlot of discards) {
+            moves.push({
+              type: 'buy',
+              slot,
+              x,
+              y,
+              ...(choice !== undefined ? { choice } : {}),
+              ...(discardSlot !== undefined ? { discardSlot } : {}),
+            })
+          }
+        }
+      }
       moves.push({ type: 'takeFacedown', slot, x, y })
     }
   })

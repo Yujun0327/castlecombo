@@ -10,13 +10,15 @@ promo cards are out of scope for v1.
 
 ## 1. Components
 
-- Two decks of character cards: **castle (grey backs)** and **village (brown backs)**.
-  Exact deck sizes per `src/data/cards.ts` (see RL-1 until transcription is verified).
+- Two decks of character cards: **castle (grey backs, 39)** and **village (brown
+  backs, 39)** — 78 unique cards, transcribed in `src/data/cards.ts` (RL-1).
 - The **messenger** pawn, marking the active row.
 - Gold coins (treated as unlimited supply) and **keys**.
-- Each card carries: a gold **cost** (top corner), zero or more heraldic **shields**,
-  optionally a **messenger icon**, an **immediate effect**, and/or an end-game
-  **scroll** scoring condition; some cards have a **purse** (end-game gold capacity).
+- Six heraldic **shield** types: noble, faith, scholar, crafts, peasant, military;
+  cards carry 1–2 shields.
+- Each card carries: a gold **cost**, its shields, optionally a **messenger icon**
+  (RL-12), a **"-1" discount banner** (RL-4), a **purse** (RL-11), an **immediate
+  effect**, and/or an end-game **scroll** scoring condition.
 
 ## 2. Setup
 
@@ -37,9 +39,10 @@ A turn is, in order:
   (a) **move the messenger** to the other row, or (b) **redraw**: discard all 3 cards
   of the messenger's current row and reveal 3 replacements from that deck.
 - **R3.2 [Mandatory, exactly once] Take a card** from the messenger's row:
-  - **Buy**: pay the card's gold cost, reduced by any printed discount the card
-    grants for shields already in your kingdom (floor 0, ruling RL-4). Place it
-    face-up in your kingdom (§4), then resolve its immediate effects (§5).
+  - **Buy**: pay the card's gold cost, reduced by 1 per applicable "-1" discount
+    banner already in your kingdom (all/castle/village scope; floor 0; a banner
+    never discounts its own purchase — ruling RL-4). Place it face-up in your
+    kingdom (§4), then resolve its immediate effects (§5).
   - **Take face-down**: instead of paying, take the chosen card face-down —
     immediately gain **6 gold and 2 keys**. The card is placed face-down in your
     kingdom; it has no shields, no effects, and scores nothing (ruling RL-2).
@@ -66,20 +69,25 @@ A turn is, in order:
 Resolved when a card is bought (never for face-down takes), in the order printed:
 
 - **R5.1** Flat gains: +N gold, +N keys.
-- **R5.2** Counted gains: +N gold per matching shield (or other countable) currently
-  in your kingdom — the just-placed card counts itself (ruling RL-4 corollary).
-- **R5.3** Opponent interactions (if present in the roster — pinned during
-  transcription, ruling RL-9): resolved deterministically, no choices.
-- **R5.4** No immediate effect ever requires a player decision; the reducer resolves
-  all effects atomically within the `buy` move.
+- **R5.2** Counted gains: +N gold/keys per matching countable (shields, cards,
+  shield types, missing types, empty cells…) currently in your kingdom — the
+  just-placed card counts itself (ruling RL-4 corollary).
+- **R5.3** Neighbour-scoped gains auto-target the better neighbouring opponent
+  (ruling RL-9); all-opponents effects apply to every other seat, floored at 0.
+- **R5.4** Printed decisions (either/or effects; discard-a-row-card effects) are
+  carried on the buy move itself (`choice`, `discardSlot`) — the reducer resolves
+  all effects atomically and deterministically within the `buy` move (RL-9).
+- **R5.5** Purse-filling effects lock supply gold onto purses immediately; pursed
+  gold is unspendable and scores at game end (RL-11).
 
 ## 6. End of game & scoring
 
 - **R6.1** The game ends when every player has placed 9 cards (equal turns by
   construction).
-- **R6.2** **Purse filling**: each player's leftover gold is placed onto their purse
-  cards, up to each card's capacity, **automatically in the optimal assignment**
-  (ruling RL-3). Gold not on a purse scores nothing.
+- **R6.2** **Purse top-up**: each player's loose gold is placed onto their purse
+  cards with room (capacity RL-11), **automatically in the optimal assignment**
+  (ruling RL-3), joining any gold locked there during play. Gold not on a purse
+  scores nothing.
 - **R6.3** Each face-up card scores its scroll condition; face-down cards score 0.
 - **R6.4** Positional conditions (row/column/center/corner/edge) evaluate on the
   normalized grid: shift the bounding box to rows/cols 0–2 (`scoring.ts normalize`).

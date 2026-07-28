@@ -2,9 +2,8 @@
 import { flushSync, mount, unmount } from 'svelte'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { OnlineSession } from '../src/app/session.svelte'
-import { mulberry32, publicHash } from '../src/engine'
+import { KINGDOM_CARDS, mulberry32, publicHash } from '../src/engine'
 import type { Move } from '../src/engine'
-import GameScreen from '../src/ui/GameScreen.svelte'
 import { Mesh } from './mesh'
 import PlayingProbe from './support/PlayingProbe.svelte'
 
@@ -52,6 +51,16 @@ function startGame(mesh: Mesh, n: number): OnlineSession[] {
   sessions[0].startGame()
   mesh.flush()
   return sessions
+}
+
+/**
+ * First turn-ending move (buy/takeFacedown). `useKey` does NOT advance the
+ * turn, so tests that need "one submit = one turn" must skip it.
+ */
+function firstTake(session: OnlineSession): Move {
+  const move = session.myMoves().find((m) => m.type !== 'useKey')
+  expect(move).toBeDefined()
+  return move!
 }
 
 beforeEach(() => {
@@ -181,25 +190,28 @@ describe('play across the mesh', () => {
     const mesh = new Mesh()
     const sessions = startGame(mesh, n)
     const rng = mulberry32(seed)
+    // each turn is ≤2 moves (optional key + exactly one take), 9 turns each
+    const maxSteps = 2 * KINGDOM_CARDS * n + 8
 
-    for (let step = 0; step < 4000 && !sessions[0].state.result; step++) {
+    for (let step = 0; !sessions[0].state.result; step++) {
+      expect(step).toBeLessThan(maxSteps)
       const current = sessions.find((s) => s.myTurn)!
       const moves = current.myMoves()
       expect(moves.length).toBeGreaterThan(0)
-      const purchases = moves.filter((m) => m.type === 'purchase')
-      const pool = purchases.length > 0 && rng() < 0.7 ? purchases : moves
-      current.submit(pool[Math.floor(rng() * pool.length)] as Move)
+      current.submit(moves[Math.floor(rng() * moves.length)])
       mesh.flush()
     }
 
     const reference = publicHash(sessions[0].state)
     for (const s of sessions) {
       expect(s.state.result).not.toBe(null)
+      expect(s.state.players.every((p) => p.placed.length === KINGDOM_CARDS)).toBe(true)
       expect(publicHash(s.state)).toBe(reference)
       expect(s.status).not.toBe('desync')
     }
   }
 
+  it('2 peers finish a full random game in lockstep', () => playRandomGame(2, 10))
   it('3 peers finish a full random game in lockstep', () => playRandomGame(3, 11))
   it('4 peers finish a full random game in lockstep', () => playRandomGame(4, 12))
 
@@ -224,14 +236,14 @@ describe('play across the mesh', () => {
     }
 
     const first = sessions.find((s) => s.myTurn)!
-    first.submit(first.myMoves()[0])
+    first.submit(firstTake(first))
     mesh.flush()
     expect(dropped).toBe(true)
     expect(publicHash(victim.state)).not.toBe(publicHash(reference.state)) // missed it
 
     // the next move arrives with a seq gap → the victim requests a resync
     const second = sessions.find((s) => s.myTurn)!
-    second.submit(second.myMoves()[0])
+    second.submit(firstTake(second))
     mesh.flush()
 
     expect(publicHash(victim.state)).toBe(publicHash(reference.state))
@@ -239,71 +251,12 @@ describe('play across the mesh', () => {
   })
 })
 
-describe('online play through the rendered UI', () => {
-  function mountGame(session: OnlineSession) {
-    const target = document.createElement('div')
-    document.body.appendChild(target)
-    const instance = mount(GameScreen, {
-      target,
-      props: { session, onExit: () => {}, onRematch: () => {} },
-    })
-    flushSync()
-    return {
-      target,
-      cleanup: () => {
-        unmount(instance)
-        target.remove()
-        document.querySelectorAll('.backdrop').forEach((n) => n.remove())
-      },
-    }
-  }
-
-  it('lets the acting player reserve via clicks and syncs it to the peer', () => {
-    const mesh = new Mesh()
-    const sessions = startGame(mesh, 2)
-    const acting = sessions.find((s) => s.myTurn)!
-    const other = sessions.find((s) => !s.myTurn)!
-    const { target, cleanup } = mountGame(acting)
-
-    const slot = [...target.querySelectorAll('button.slot')].find(
-      (b) => b.getAttribute('aria-label') === 'tier 1 card',
-    ) as HTMLButtonElement
-    slot.click()
-    flushSync()
-    const reserveBtn = [...document.querySelectorAll('button')].find((b) =>
-      b.textContent!.trim().startsWith('Reserve'),
-    )!
-    expect(reserveBtn.disabled).toBe(false)
-    reserveBtn.click()
-    flushSync()
-    mesh.flush()
-
-    expect(acting.state.players[acting.seat!].reserved.length).toBe(1)
-    expect(acting.state.players[acting.seat!].tokens.gold).toBe(1)
-    expect(publicHash(other.state)).toBe(publicHash(acting.state)) // peer applied it
-    cleanup()
-  })
-
-  it('tells the waiting player why the card actions are unavailable', () => {
-    const mesh = new Mesh()
-    const sessions = startGame(mesh, 2)
-    const waiting = sessions.find((s) => !s.myTurn)!
-    const { target, cleanup } = mountGame(waiting)
-
-    const slot = [...target.querySelectorAll('button.slot')].find(
-      (b) => b.getAttribute('aria-label') === 'tier 1 card',
-    ) as HTMLButtonElement
-    slot.click()
-    flushSync()
-
-    const buttons = [...document.querySelectorAll('button')]
-    const buy = buttons.find((b) => b.textContent!.trim().startsWith('Purchase'))!
-    const reserveBtn = buttons.find((b) => b.textContent!.trim().startsWith('Reserve'))!
-    expect(buy.disabled).toBe(true)
-    expect(reserveBtn.disabled).toBe(true)
-    expect(document.body.textContent).toContain('to finish their turn')
-    cleanup()
-  })
+describe('online play through the rendered UI (M4)', () => {
+  // GameScreen is still the splendor board; these come back once the Castle
+  // Combo table lands in M4.
+  it.todo('lets the acting player buy a card via clicks and syncs it to the peer')
+  it.todo('lets the acting player spend a key (switch/refresh) via clicks')
+  it.todo('tells the waiting player why the card actions are unavailable')
 })
 
 describe('reconnect and spectators', () => {
@@ -312,21 +265,21 @@ describe('reconnect and spectators', () => {
     const sessions = startGame(mesh, 3)
     const lostSeat = sessions[2].seat
 
-    // play a few moves, then peer-2 vanishes
+    // play a few turns, then peer-2 vanishes
     for (let i = 0; i < 3; i++) {
       const s = sessions.find((x) => x.myTurn)!
-      s.submit(s.myMoves()[0])
+      s.submit(firstTake(s))
       mesh.flush()
     }
     mesh.drop('peer-2')
     sessions[2].destroy()
     mesh.flush()
 
-    // two more moves happen while they are away
+    // two more turns happen while they are away
     for (let i = 0; i < 2; i++) {
       const s = sessions.slice(0, 2).find((x) => x.myTurn)
       if (!s) break // it may be the absent player's turn
-      s.submit(s.myMoves()[0])
+      s.submit(firstTake(s))
       mesh.flush()
     }
 
@@ -337,6 +290,44 @@ describe('reconnect and spectators', () => {
 
     expect(revived.seat).toBe(lostSeat) // seat reclaimed
     expect(publicHash(revived.state)).toBe(publicHash(sessions[0].state))
+  })
+
+  it('recovers a mid-turn key spend from local storage and finishes the turn', () => {
+    // M5 gate for two-move turns: refresh BETWEEN the useKey and the take
+    const mesh = new Mesh()
+    const sessions = startGame(mesh, 2)
+    const actingIdx = sessions.findIndex((s) => s.myTurn)
+    const acting = sessions[actingIdx]
+    const other = sessions[1 - actingIdx]
+
+    const useKey = acting.myMoves().find((m) => m.type === 'useKey')
+    expect(useKey).toBeDefined() // everyone starts with 2 keys
+    acting.submit(useKey!)
+    mesh.flush()
+    expect(acting.state.keyUsedThisTurn).toBe(true)
+    expect(acting.myTurn).toBe(true) // still the same seat's turn
+    expect(publicHash(other.state)).toBe(publicHash(acting.state))
+
+    // the acting client's tab refreshes mid-turn: transport gone, then a new
+    // session for the same playerKey reconstructs from localStorage
+    mesh.drop(`peer-${actingIdx}`)
+    acting.destroy()
+    mesh.flush()
+    const revived = addPeer(mesh, actingIdx)
+    expect(revived.playing).toBe(true) // restored before any wire traffic
+    expect(revived.myTurn).toBe(true)
+    expect(revived.state.keyUsedThisTurn).toBe(true) // the key spend survived
+    expect(revived.myMoves().some((m) => m.type === 'useKey')).toBe(false) // no second key
+    mesh.flush()
+    expect(publicHash(revived.state)).toBe(publicHash(other.state))
+
+    // it can now finish the interrupted turn with the take
+    revived.submit(firstTake(revived))
+    mesh.flush()
+    expect(revived.myTurn).toBe(false) // turn passed
+    expect(publicHash(other.state)).toBe(publicHash(revived.state))
+    expect(other.status).toBe('playing')
+    expect(revived.status).toBe('playing')
   })
 
   it('marks the table as waiting when the acting player disconnects', () => {
@@ -350,13 +341,14 @@ describe('reconnect and spectators', () => {
     expect(sessions[waitingIdx].waitingOn).toBe(`P${actingIdx}`)
   })
 
-  it('gives a latecomer a spectator view, blind reserves hidden', () => {
+  it('gives a latecomer a spectator view of the running game', () => {
     const mesh = new Mesh()
     const sessions = startGame(mesh, 2)
 
-    // the acting player blind-reserves so there is something to hide
+    // the acting player takes a card face-down so a hidden-info placement exists
     const acting = sessions.find((s) => s.myTurn)!
-    acting.submit({ type: 'reserve', from: { deck: 1 } })
+    const facedown = acting.myMoves().find((m) => m.type === 'takeFacedown')!
+    acting.submit(facedown)
     mesh.flush()
 
     const spec = addPeer(mesh, 7)
@@ -367,7 +359,10 @@ describe('reconnect and spectators', () => {
     expect(spec.myTurn).toBe(false)
     expect(spec.myMoves()).toEqual([])
     expect(publicHash(spec.state)).toBe(publicHash(sessions[0].state))
-    const hidden = spec.visibleState.players[acting.seat!].reserved
-    expect(hidden[0].card).toBe(-1) // masked for spectators
+    // Castle Combo is open information — the spectator sees the whole table,
+    // including the face-down placement (its flag, like everyone else's view)
+    const placed = spec.visibleState.players[acting.seat!].placed
+    expect(placed.length).toBe(1)
+    expect(placed[0].faceDown).toBe(true)
   })
 })

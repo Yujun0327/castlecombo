@@ -8,7 +8,7 @@ import type { SavedGame } from './persist'
 
 export type SfxEvent = 'key' | 'buy' | 'facedown' | 'coins' | 'win' | 'lose'
 
-export const RULES_VERSION = '1'
+export const RULES_VERSION = '2'
 
 export abstract class BaseSession {
   cfg = $state<GameConfig>() as GameConfig

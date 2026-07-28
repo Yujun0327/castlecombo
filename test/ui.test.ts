@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
 import { flushSync, mount, unmount } from 'svelte'
 import { describe, expect, it } from 'vitest'
-import { CARDS } from '../src/data'
-import { HotseatSession } from '../src/app/session.svelte'
-import type { Gem } from '../src/engine'
-import GameScreen from '../src/ui/GameScreen.svelte'
 import Home from '../src/ui/Home.svelte'
 
 // jsdom has no Web Animations API; give Svelte transitions an instantly-
@@ -37,8 +33,12 @@ function render(component: Parameters<typeof mount>[0], props: Record<string, un
   }
 }
 
+/**
+ * Minimal smoke suite: the splendor-era game UI is being rewritten for
+ * Castle Combo in M4, so only the Home screen is exercised here.
+ */
 describe('Home', () => {
-  it('renders the hotseat setup and starts a game', () => {
+  it('renders the title and starts a hotseat game', () => {
     let started: { count: number; names: string[] } | null = null
     const { target, cleanup } = render(Home, {
       onHotseat: (count: number, names: string[]) => (started = { count, names }),
@@ -51,98 +51,30 @@ describe('Home', () => {
     expect(started).toMatchObject({ count: 2 })
     cleanup()
   })
+
+  it('offers the create/join room controls when online play is wired', () => {
+    const { target, cleanup } = render(Home, {
+      onHotseat: () => {},
+      onCreateRoom: () => {},
+      onJoinRoom: () => {},
+    })
+
+    const open = [...target.querySelectorAll('button')].find((b) =>
+      b.textContent!.includes('Open a room'),
+    ) as HTMLButtonElement
+    expect(open).toBeDefined()
+    expect(open.disabled).toBe(false)
+
+    const code = target.querySelector('input[aria-label="room code"]') as HTMLInputElement
+    expect(code).not.toBe(null)
+    cleanup()
+  })
 })
 
-describe('GameScreen (hotseat)', () => {
-  it('renders the full table and plays a token take', () => {
-    const session = new HotseatSession(3, ['Ana', 'Bo', 'Cy'])
-    const { target, cleanup } = render(GameScreen, {
-      session,
-      onExit: () => {},
-      onRematch: () => {},
-    })
-
-    // table anatomy: 4 nobles, 12 market cards + 3 decks, 6 bank chips
-    expect(target.textContent).toContain('to play')
-    expect(target.querySelectorAll('.noble').length).toBe(4)
-    expect(target.querySelectorAll('.slot').length).toBe(12)
-    expect(target.querySelectorAll('.deck').length).toBe(3)
-
-    // tap three bank chips and confirm the take
-    const actorBefore = session.actor
-    const chip = (label: string) =>
-      [...target.querySelectorAll('button')].find((b) =>
-        b.getAttribute('aria-label')?.startsWith(label),
-      )!
-    chip('take ruby').click()
-    flushSync()
-    chip('take onyx').click()
-    flushSync()
-    chip('take emerald').click()
-    flushSync()
-    const confirm = [...target.querySelectorAll('button')].find((b) => b.textContent!.includes('Take'))!
-    confirm.click()
-    flushSync()
-
-    expect(session.state.players[actorBefore].tokens.ruby).toBe(1)
-    expect(session.actor).not.toBe(actorBefore)
-    cleanup()
-  })
-
-  it('purchases a card through the action sheet', () => {
-    const session = new HotseatSession(2, ['Ana', 'Bo'])
-    // bankroll the actor for the first tier-1 card so Purchase is live
-    const id = session.state.market[0][0]!
-    const def = CARDS.find((c) => c.id === id)!
-    const actor = session.actor
-    for (const [gem, n] of Object.entries(def.cost)) {
-      session.state.players[actor].tokens[gem as Gem] += n!
-      session.state.bank[gem as Gem] -= n!
-    }
-    const { target, cleanup } = render(GameScreen, {
-      session,
-      onExit: () => {},
-      onRematch: () => {},
-    })
-
-    const slot = [...target.querySelectorAll('button.slot')].find(
-      (b) => b.getAttribute('aria-label') === 'tier 1 card',
-    ) as HTMLButtonElement
-    slot.click()
-    flushSync()
-    const buy = [...document.querySelectorAll('button')].find((b) =>
-      b.textContent!.trim().startsWith('Purchase'),
-    )!
-    expect(buy.disabled).toBe(false)
-    buy.click()
-    flushSync()
-
-    expect(session.state.players[actor].cards).toContain(id)
-    expect(session.state.market[0][0]).not.toBe(id) // slot refilled
-    expect(document.querySelector('.backdrop')).toBe(null)
-    cleanup()
-  })
-
-  it('reserves a market card through the action sheet', () => {
-    const session = new HotseatSession(2, ['Ana', 'Bo'])
-    const { target, cleanup } = render(GameScreen, {
-      session,
-      onExit: () => {},
-      onRematch: () => {},
-    })
-
-    const actor = session.actor
-    ;(target.querySelector('.slot') as HTMLButtonElement).click()
-    flushSync()
-    const reserveBtn = [...document.querySelectorAll('button')].find((b) =>
-      b.textContent!.trim().startsWith('Reserve'),
-    )!
-    reserveBtn.click()
-    flushSync()
-
-    expect(session.state.players[actor].reserved.length).toBe(1)
-    expect(session.state.players[actor].tokens.gold).toBe(1)
-    expect(document.querySelector('.backdrop')).toBe(null) // sheet closed
-    cleanup()
-  })
+describe('GameScreen (M4)', () => {
+  // The table UI is still the splendor board; M4 must cover at minimum:
+  it.todo('renders the full table: both market rows, messenger position, kingdoms')
+  it.todo('buys a card and places it on a legal kingdom cell')
+  it.todo('takes a card face-down for gold and keys')
+  it.todo('spends a key to switch rows or refresh the market')
 })

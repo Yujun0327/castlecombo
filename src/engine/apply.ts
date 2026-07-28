@@ -1,11 +1,11 @@
 import { cardById } from '../data'
 import { deepClone } from './clone'
-import { effectiveCost, resolveEffects } from './effects'
+import { buyRequirements, effectiveCost, resolveEffects } from './effects'
 import { legalCells } from './legality'
-import { mulberry32, seededShuffle } from './rng'
+import { draw, refill } from './market'
 import { computeResult } from './scoring'
 import { FACEDOWN_GOLD, FACEDOWN_KEYS, KINGDOM_CARDS, otherDeck, ROW_SLOTS } from './types'
-import type { Deck, GameState, Move, Placement, Seat } from './types'
+import type { GameState, Move, Placement, Seat } from './types'
 
 /**
  * The single pure reducer. Throws on any illegal move; never mutates `prev`.
@@ -57,6 +57,7 @@ export function applyMove(prev: GameState, actor: Seat, move: Move): GameState {
         x: move.x,
         y: move.y,
         faceDown: move.type === 'takeFacedown',
+        purseGold: 0,
       }
 
       if (move.type === 'buy') {
@@ -64,44 +65,23 @@ export function applyMove(prev: GameState, actor: Seat, move: Move): GameState {
         if (cost > player.gold) throw new Error('cannot afford')
         player.gold -= cost
         player.placed.push(placement)
-        resolveEffects(state, actor, placement, cardById.get(card)!.onBuy ?? [])
+        resolveEffects(state, actor, placement, cardById.get(card)!.onBuy ?? [], move)
       } else {
         player.gold += FACEDOWN_GOLD
         player.keys += FACEDOWN_KEYS
         player.placed.push(placement)
       }
 
-      const row = state.messenger
-      refill(state, row, move.slot)
+      refill(state, state.messenger, move.slot)
       // the messenger icon is public on the market card, so it moves the pawn
-      // even for face-down takes (RL-8)
-      const icon = cardById.get(card)!.messenger
-      if (icon && state.rows[icon].some((c) => c !== null)) state.messenger = icon
+      // even for face-down takes (RL-8); the icon sends it to the other row (RL-12)
+      if (cardById.get(card)!.messenger) {
+        const target = otherDeck(state.messenger)
+        if (state.rows[target].some((c) => c !== null)) state.messenger = target
+      }
       advanceTurn(state)
       return state
     }
-  }
-}
-
-/** Pop from a deck, deterministically reshuffling its discard first if needed (RL-5). */
-function draw(state: GameState, d: Deck): number | null {
-  if (state.decks[d].length === 0 && state.discard[d].length > 0) {
-    state.rngState = (Math.imul(state.rngState, 1664525) + 1013904223) >>> 0
-    state.decks[d] = seededShuffle(state.discard[d], mulberry32(state.rngState))
-    state.discard[d] = []
-  }
-  return state.decks[d].pop() ?? null
-}
-
-function refill(state: GameState, d: Deck, slot: number): void {
-  state.rows[d][slot] = draw(state, d)
-  // a fully dead row pins the messenger to the surviving one (RL-5)
-  if (
-    state.messenger === d &&
-    !state.rows[d].some((c) => c !== null) &&
-    state.rows[otherDeck(d)].some((c) => c !== null)
-  ) {
-    state.messenger = otherDeck(d)
   }
 }
 

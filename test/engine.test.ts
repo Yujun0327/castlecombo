@@ -48,7 +48,7 @@ function fixture(overrides: Partial<GameState> = {}): GameState {
 }
 
 function up(card: number, x: number, y: number): Placement {
-  return { card, x, y, faceDown: false }
+  return { card, x, y, faceDown: false, purseGold: 0 }
 }
 
 /* ------------------------------------------------------------------ */
@@ -209,47 +209,79 @@ describe('buy and take-face-down', () => {
     const gap = fixture({ rows: { castle: [0, 1, 2], village: [null, 101, 102] } })
     expect(() => applyMove(gap, 0, { type: 'takeFacedown', slot: 0, x: 0, y: 0 })).toThrow(/empty/)
     const broke = fixture({ players: [player({ gold: 0 }), player()] })
-    const costly = cardById.get(broke.rows.village[1]!)!
-    if (costly.cost > 0 && !costly.discount) {
-      expect(() => applyMove(broke, 0, { type: 'buy', slot: 1, x: 0, y: 0 })).toThrow(/afford/)
-    }
+    expect(cardById.get(broke.rows.village[2]!)!.cost).toBeGreaterThan(0)
+    expect(() => applyMove(broke, 0, { type: 'buy', slot: 2, x: 0, y: 0 })).toThrow(/afford/)
     expect(() => applyMove(g, 1, { type: 'buy', slot: 0, x: 0, y: 0 })).toThrow(/turn/)
   })
 
-  it('messenger icon moves the pawn — also on face-down takes (RL-8)', () => {
-    const carpenter = byName('The Carpenter') // village card sending the messenger to the castle
-    const g = fixture({ rows: { castle: [0, 1, 2], village: [carpenter.id, 101, 102] } })
+  it('messenger icon moves the pawn — also on face-down takes (RL-8, RL-12)', () => {
+    const fisherman = byName('Fisherman') // confirmed messenger icon: pawn toggles rows
+    const g = fixture({ rows: { castle: [0, 1, 2], village: [fisherman.id, 101, 102] } })
     expect(applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 }).messenger).toBe('castle')
     expect(applyMove(g, 0, { type: 'takeFacedown', slot: 0, x: 0, y: 0 }).messenger).toBe('castle')
   })
 })
 
 describe('discounts and effects', () => {
-  it('printed discount counts the kingdom before placement, floored at 0 (RL-4)', () => {
-    const mason = byName('The Mason') // cost 5, −2 per castle card in your kingdom
-    expect(effectiveCost([], mason.id)).toBe(5)
-    expect(effectiveCost([up(0, 0, 0), up(1, 1, 0)], mason.id)).toBe(1)
-    expect(effectiveCost([up(0, 0, 0), up(1, 1, 0), up(2, 0, 1)], mason.id)).toBe(0)
+  it('discount banners are cumulative, scope-aware, future-only, floored at 0 (RL-4)', () => {
+    const squire = byName('Squire') // banner: all
+    const stonemason = byName('Stonemason') // banner: village
+    const philosopher = byName('Philosopher') // banner: castle
+    const nun = byName('Nun') // village, cost 3
+    const duchess = byName('Duchess') // castle, cost 5
+    expect(effectiveCost([], nun.id)).toBe(3)
+    const banners = [up(squire.id, 0, 0), up(stonemason.id, 1, 0), up(philosopher.id, 2, 0)]
+    expect(effectiveCost(banners, nun.id)).toBe(1) // all + village apply, castle does not
+    expect(effectiveCost(banners, duchess.id)).toBe(3) // all + castle apply
+    // a banner never discounts its own purchase, and cost floors at 0
+    expect(effectiveCost([up(squire.id, 0, 0)], squire.id)).toBe(0) // cost 0 anyway
+    const cheap = [up(squire.id, 0, 0), up(squire.id, 1, 0), up(stonemason.id, 2, 0), up(stonemason.id, 0, 1)]
+    expect(effectiveCost(cheap, nun.id)).toBe(0)
   })
 
   it('a per-shield immediate effect counts the just-placed card itself (RL-4)', () => {
-    const marshal = byName('The Marshal') // +2 gold per gules shield, carries 2 gules itself
-    const g = fixture({ rows: { castle: [marshal.id, 1, 2], village: [100, 101, 102] }, messenger: 'castle' })
+    const jester = byName('Jester') // +2 gold per noble shield, carries one itself
+    const g = fixture({ rows: { castle: [jester.id, 1, 2], village: [100, 101, 102] }, messenger: 'castle' })
     const s = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 })
-    expect(s.players[0].gold).toBe(START_GOLD - marshal.cost + 4)
+    expect(s.players[0].gold).toBe(START_GOLD - jester.cost + 2)
   })
 
-  it('opponent effects settle deterministically and floor at 0', () => {
-    const tax = byName('The Tax Collector') // each opponent −1, you +1 per opponent
+  it('all-opponents effects settle deterministically', () => {
+    const majesty = byName('His Majesty') // every opponent gains 1 gold
     const g = fixture({
       players: [player(), player({ gold: 0 }), player()],
-      rows: { castle: [tax.id, 1, 2], village: [100, 101, 102] },
+      rows: { castle: [majesty.id, 1, 2], village: [100, 101, 102] },
       messenger: 'castle',
     })
     const s = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 })
-    expect(s.players[1].gold).toBe(0) // floored
-    expect(s.players[2].gold).toBe(START_GOLD - 1)
-    expect(s.players[0].gold).toBe(START_GOLD - tax.cost + 2)
+    expect(s.players[1].gold).toBe(1)
+    expect(s.players[2].gold).toBe(START_GOLD + 1)
+    expect(s.players[0].gold).toBe(START_GOLD - majesty.cost)
+  })
+
+  it('either/or effects follow the choice carried on the move (RL-9)', () => {
+    const barbarian = byName('Barbarian') // gold per opposing scholar OR 2 keys
+    const scholarCard = byName('Inventor') // 1 scholar shield
+    const g = fixture({
+      players: [player(), player({ placed: [up(scholarCard.id, 0, 0), up(scholarCard.id, 1, 0)] })],
+      rows: { castle: [0, 1, 2], village: [barbarian.id, 101, 102] },
+    })
+    const a = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0, choice: 'a' })
+    expect(a.players[0].gold).toBe(START_GOLD - barbarian.cost + 2) // 2 scholars next door
+    const b = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0, choice: 'b' })
+    expect(b.players[0].keys).toBe(START_KEYS + 2)
+    expect(() => applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 })).toThrow(/choice/)
+  })
+
+  it('discard-row effects pay the printed cost and refill the gap', () => {
+    const executioner = byName('Executioner') // discard from the castle row, gain its cost
+    const g = fixture({ rows: { castle: [0, 1, 2], village: [executioner.id, 101, 102] } })
+    const victimCost = cardById.get(g.rows.castle[1]!)!.cost
+    const s = applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0, discardSlot: 1 })
+    expect(s.players[0].gold).toBe(START_GOLD - executioner.cost + victimCost)
+    expect(s.discard.castle).toContain(1)
+    expect(s.rows.castle[1]).not.toBeNull()
+    expect(() => applyMove(g, 0, { type: 'buy', slot: 0, x: 0, y: 0 })).toThrow(/discardSlot/)
   })
 })
 
@@ -262,33 +294,37 @@ describe('scoring', () => {
   })
 
   it('position scoring reads the normalized grid (R6.4)', () => {
-    const queen = byName('The Queen') // 8 pts in the center
-    // queen at raw (-1,-1) inside a full 3×3 spanning (-2..0)²: the center
+    const spy = byName('Spy') // 6 pts in the middle column
+    // spy at raw (-1,-2) inside a full 3×3 spanning (-2..0)²: middle column
     const placed: Placement[] = []
     for (let y = -2; y <= 0; y++) {
       for (let x = -2; x <= 0; x++) {
-        placed.push(up(x === -1 && y === -1 ? queen.id : 101, x, y))
+        placed.push(up(x === -1 && y === -2 ? spy.id : 101, x, y))
       }
     }
     const p = player({ placed, keys: 0, gold: 0 })
-    const line = scoreBreakdown(p).cards.find((c) => c.card === queen.id)!
-    expect(line.points).toBe(8)
+    const line = scoreBreakdown(p).cards.find((c) => c.card === spy.id)!
+    expect(line.points).toBe(6)
   })
 
-  it('fills purses greedily by rate and keeps the leftover as tiebreak gold (RL-3, RL-10)', () => {
-    const inn = byName('The Innkeeper') // purse 6 @ 2 pts/gold
-    const lender = byName('The Moneylender') // purse 10 @ 1 pt/gold
-    const p = player({ gold: 10, keys: 0, placed: [up(inn.id, 0, 0), up(lender.id, 1, 0)] })
-    const { purseGold, leftover } = allocatePurses(p)
-    expect(purseGold.get(0)).toBe(6) // best rate filled first
-    expect(purseGold.get(1)).toBe(4)
+  it('fills purses greedily by rate and keeps the leftover as tiebreak gold (RL-3, RL-10, RL-11)', () => {
+    const inn = byName('Innkeeper') // purse @ 2 pts/gold
+    const banker = byName('Banker') // purse @ 1 pt/gold-anywhere (goldOnPurses)
+    const p = player({ gold: 8, keys: 0, placed: [up(inn.id, 0, 0), up(banker.id, 1, 0)] })
+    const { finalPlaced, leftover } = allocatePurses(p)
+    expect(finalPlaced[0].purseGold).toBe(5) // best rate filled to PURSE_CAP first
+    expect(finalPlaced[1].purseGold).toBe(3) // banker's purse pays via its own scroll
     expect(leftover).toBe(0)
     const rich = player({ gold: 20, keys: 0, placed: [up(inn.id, 0, 0)] })
-    expect(allocatePurses(rich).leftover).toBe(14)
+    expect(allocatePurses(rich).leftover).toBe(15)
+    // and the scroll actually pays: 2/coin on the innkeeper, 1/coin-anywhere on the banker
+    const b = scoreBreakdown(p)
+    expect(b.cards[0].points).toBe(2 * 5)
+    expect(b.cards[1].points).toBe(1 * 8)
   })
 
   it('keys score 1 each; face-down cards score 0', () => {
-    const p = player({ keys: 3, gold: 0, placed: [{ card: 0, x: 0, y: 0, faceDown: true }] })
+    const p = player({ keys: 3, gold: 0, placed: [{ card: 0, x: 0, y: 0, faceDown: true, purseGold: 0 }] })
     const b = scoreBreakdown(p)
     expect(b.keyPoints).toBe(3)
     expect(b.cards[0].points).toBe(0)
@@ -302,6 +338,7 @@ describe('scoring', () => {
         x: i % 3,
         y: Math.floor(i / 3),
         faceDown: true,
+        purseGold: 0,
       }))
     const g = fixture({
       players: [

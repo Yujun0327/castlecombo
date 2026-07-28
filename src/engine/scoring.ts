@@ -1,6 +1,6 @@
 import { cardById } from '../data'
-import { countMatches } from './effects'
-import { KEY_POINTS } from './types'
+import { countMatches, purseRate } from './effects'
+import { KEY_POINTS, PURSE_CAP } from './types'
 import type {
   GameState,
   Placement,
@@ -18,78 +18,92 @@ export function normalize(placed: readonly Placement[]): Map<number, { x: number
   return new Map(placed.map((p, i) => [i, { x: p.x - minX, y: p.y - minY }]))
 }
 
-/** Points-per-gold rate of a purse card's scroll (0 when it has none). */
-function purseRate(cardId: number): number {
-  const scroll = cardById.get(cardId)!.scroll ?? []
-  for (const s of scroll) {
-    if (s.kind === 'per' && s.what.count === 'goldOnThisPurse') return s.points
-  }
-  return 0
-}
-
 /**
- * RL-3: leftover gold fills purses automatically in the optimal assignment.
- * With linear per-gold rates, greedy by descending rate is optimal.
- * Returns gold per placement index and the gold that found no purse.
+ * RL-3: at game end, loose gold tops up purses with room automatically in
+ * the optimal assignment (greedy by descending per-gold rate — optimal for
+ * linear rates). Returns a VIEW of the placements with final purse gold,
+ * plus the gold that found no purse (the tiebreaker, RL-10).
  */
-export function allocatePurses(player: PlayerState): { purseGold: Map<number, number>; leftover: number } {
-  const purseGold = new Map<number, number>()
-  const purses = player.placed
-    .map((p, i) => ({ i, p }))
-    .filter(({ p }) => !p.faceDown && cardById.get(p.card)!.purse !== undefined)
-    .sort((a, b) => purseRate(b.p.card) - purseRate(a.p.card) || a.i - b.i)
+export function allocatePurses(player: PlayerState): { finalPlaced: Placement[]; leftover: number } {
+  const finalPlaced = player.placed.map((p) => ({ ...p }))
+
+  // "per coin in ANY purse" scrolls (Banker) raise every purse's value equally
+  let bonus = 0
+  for (const p of finalPlaced) {
+    if (p.faceDown) continue
+    for (const s of cardById.get(p.card)!.scroll ?? []) {
+      if (s.kind === 'per' && s.what.count === 'goldOnPurses') bonus += s.points
+    }
+  }
+
+  const purses = finalPlaced
+    .filter((p) => !p.faceDown && cardById.get(p.card)!.purse)
+    .sort((a, b) => purseRate(b.card) - purseRate(a.card))
 
   let gold = player.gold
-  for (const { i, p } of purses) {
-    const take = Math.min(gold, cardById.get(p.card)!.purse!)
-    if (take > 0) purseGold.set(i, take)
+  for (const p of purses) {
+    if (purseRate(p.card) + bonus <= 0) break // a worthless purse beats losing tiebreak gold
+    const take = Math.min(gold, PURSE_CAP - p.purseGold)
+    p.purseGold += take
     gold -= take
   }
-  return { purseGold, leftover: gold }
+  return { finalPlaced, leftover: gold }
 }
 
 function scoreScroll(
-  player: PlayerState,
+  finalPlaced: readonly Placement[],
+  keys: number,
   at: Placement,
   pos: { x: number; y: number },
   entry: Scoring,
-  purseGold: number,
 ): number {
-  const ctx = { keys: player.keys, purseGold }
+  const ctx = { keys }
   switch (entry.kind) {
     case 'flat':
       return entry.points
     case 'per': {
-      const n = countMatches(player.placed, at, entry.what, entry.where, ctx)
-      return entry.points * Math.min(n, entry.cap ?? Infinity)
+      const n = countMatches(finalPlaced, at, entry.what, entry.where, ctx)
+      const groups = Math.floor(n / (entry.each ?? 1))
+      return entry.points * Math.min(groups, entry.cap ?? Infinity)
     }
     case 'position': {
       const corner = (pos.x === 0 || pos.x === 2) && (pos.y === 0 || pos.y === 2)
       const center = pos.x === 1 && pos.y === 1
-      const hit =
-        entry.at === 'center' ? center : entry.at === 'corner' ? corner : !center && !corner
-      return hit ? entry.points : 0
+      switch (entry.at) {
+        case 'top': return pos.y === 0 ? entry.points : 0
+        case 'bottom': return pos.y === 2 ? entry.points : 0
+        case 'left': return pos.x === 0 ? entry.points : 0
+        case 'right': return pos.x === 2 ? entry.points : 0
+        case 'middleRow': return pos.y === 1 ? entry.points : 0
+        case 'middleCol': return pos.x === 1 ? entry.points : 0
+        case 'corner': return corner ? entry.points : 0
+        case 'edge': return !corner && !center ? entry.points : 0
+        case 'center': return center ? entry.points : 0
+      }
+      break
     }
     case 'threshold':
-      return countMatches(player.placed, at, entry.what, entry.where, ctx) >= entry.atLeast
+      return countMatches(finalPlaced, at, entry.what, entry.where, ctx) >= entry.atLeast
         ? entry.points
         : 0
+    case 'absent':
+      return countMatches(finalPlaced, at, entry.what, entry.where, ctx) === 0 ? entry.points : 0
   }
+  return 0
 }
 
 export function scoreBreakdown(player: PlayerState): ScoreBreakdown {
-  const { purseGold, leftover } = allocatePurses(player)
-  const positions = normalize(player.placed)
+  const { finalPlaced, leftover } = allocatePurses(player)
+  const positions = normalize(finalPlaced)
 
-  const cards: ScoreCardLine[] = player.placed.map((p, i) => {
+  const cards: ScoreCardLine[] = finalPlaced.map((p, i) => {
     if (p.faceDown) return { card: p.card, points: 0, purseGold: 0 } // RL-2
     const scroll = cardById.get(p.card)!.scroll ?? []
-    const gold = purseGold.get(i) ?? 0
     const points = scroll.reduce(
-      (sum, entry) => sum + scoreScroll(player, p, positions.get(i)!, entry, gold),
+      (sum, entry) => sum + scoreScroll(finalPlaced, player.keys, p, positions.get(i)!, entry),
       0,
     )
-    return { card: p.card, points, purseGold: gold }
+    return { card: p.card, points, purseGold: p.purseGold }
   })
 
   const keyPoints = player.keys * KEY_POINTS
