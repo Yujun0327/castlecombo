@@ -107,7 +107,7 @@
       <p class="hint">
         {#if session.status === 'connecting' && filled.length <= 1}
           <span class="dot" class:on={relays > 0}></span>
-          {relays > 0 ? 'Connected to the signaling network.' : 'Reaching the signaling network…'}
+          {relays > 0 ? 'Connected to the game network.' : 'Reaching the game network…'}
           {#if !session.isHost}
             Waiting for the host.
           {:else}

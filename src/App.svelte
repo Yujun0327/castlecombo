@@ -1,7 +1,7 @@
 <script lang="ts">
   import { loadPlayerName, playerKey } from './app/persist'
   import { HotseatSession, OnlineSession } from './app/session.svelte'
-  import { makeRoomCode } from './transport/trystero'
+  import { makeRoomCode } from '@yujun/game-net'
   import Gallery from './ui/Gallery.svelte'
   import GameScreen from './ui/GameScreen.svelte'
   import Home from './ui/Home.svelte'
