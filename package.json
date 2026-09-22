@@ -26,6 +26,6 @@
     "@fontsource-variable/grenze-gotisch": "^5.3.0",
     "@fontsource/alegreya-sans-sc": "^5.3.0",
     "@fontsource/eb-garamond": "^5.3.0",
-    "@yujun/game-net": "github:Yujun0327/game-net#v0.3.0"
+    "@yujun/game-net": "github:Yujun0327/game-net#v0.3.1"
   }
 }
