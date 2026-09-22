@@ -346,6 +346,11 @@ export class OnlineSession extends BaseSession {
     return this.c.channelCount()
   }
 
+  /** Brokers configured for this build. */
+  brokerCount(): number {
+    return this.core.channels().length
+  }
+
   rescan(): void {
     this.core.rescan()
   }
