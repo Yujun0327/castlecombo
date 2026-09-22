@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WalletBadge from './WalletBadge.svelte'
   import RulesLeaflet from './RulesLeaflet.svelte'
   import { wobblyLine } from './wobble'
 
@@ -35,6 +36,7 @@
     <p class="flavor">Build your kingdom, nine cards square.</p>
     <button class="btn btn--quiet" onclick={() => (rulesOpen = true)}>How to play</button>
   </header>
+  <WalletBadge />
 
   <div class="panels">
     <section class="card panel">

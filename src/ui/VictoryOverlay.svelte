@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PayoutLine from './PayoutLine.svelte'
   import { fly } from 'svelte/transition'
   import { OnlineSession } from '../app/session.svelte'
   import type { BaseSession } from '../app/session.svelte'
@@ -75,6 +76,7 @@
       {/if}
 
       <div class="row">
+        <PayoutLine payout={online?.payout ?? null} lock={online?.lockState ?? null} />
         <button class="btn btn--gold" onclick={onRematch}>Rematch</button>
         <button class="btn btn--quiet" onclick={onExit}>Leave the table</button>
       </div>

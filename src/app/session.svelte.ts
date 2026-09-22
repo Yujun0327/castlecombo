@@ -7,6 +7,7 @@ import {
   type GameAdapter,
   type Transport,
 } from '@yujun/game-net'
+import { WalletSession, defaultLedger, loadIdentity, type Identity, type Ledger, type LockState, type Payout } from '@yujun/game-net/wallet'
 import { APP } from './persist'
 
 export type SfxEvent = 'key' | 'buy' | 'facedown' | 'coins' | 'win' | 'lose'
@@ -154,7 +155,7 @@ type Core = BeaconSession<GameConfig, GameState, Move>
 function makeAdapter(host: () => OnlineSession | null): GameAdapter<GameConfig, GameState, Move> {
   return {
     app: APP,
-    protocol: 2,
+    protocol: 3,
     rulesVersion: RULES_VERSION,
     minSeats: 2,
     maxSeats: 4,
@@ -175,10 +176,13 @@ function makeAdapter(host: () => OnlineSession | null): GameAdapter<GameConfig, 
     hash: publicHash,
     actor: (s) => s.turn,
     isOver: (s) => s.result !== null,
+    winners: (s) => s.result?.winners ?? [],
   }
 }
 
 export interface OnlineTestHooks {
+  ledger?: Ledger
+  identity?: Identity
   transport?: Transport<Beacon<GameConfig, Move>>
   now?: () => number
   timers?: boolean
@@ -190,6 +194,7 @@ export class OnlineSession extends BaseSession {
   readonly myKey: string
 
   private readonly core: Core
+  private wallet: WalletSession<GameConfig, GameState, Move, undefined> | null = null
   /**
    * Reactive revision, bumped on every core change. Every getter reads it
    * first, so templates track it even when the rest short-circuits — if
@@ -222,6 +227,12 @@ export class OnlineSession extends BaseSession {
     this.seenLog = core.logLength
     this.gameId = core.snapshot?.gameId ?? ''
     core.subscribe(() => this.sync())
+    // the platform wallet: locks stakes, signs and posts settlements, reports payouts
+    const ledger = test.ledger ?? (test.transport ? null : defaultLedger())
+    if (ledger) {
+      this.wallet = new WalletSession(core, APP, test.identity ?? loadIdentity(), ledger, test.now)
+      this.wallet.subscribe(() => this.rev++)
+    }
   }
 
   /** The core, read through the reactive revision. */
@@ -360,11 +371,27 @@ export class OnlineSession extends BaseSession {
     return this.core
   }
 
+  /** Wallet outcome of the current game (null when this build has no wallet). */
+  get payout(): Payout | null {
+    void this.rev
+    return this.wallet?.payout ?? null
+  }
+
+  get lockState(): LockState | null {
+    void this.rev
+    return this.wallet?.lock ?? null
+  }
+
+  get ledger(): Ledger | null {
+    return this.wallet ? (this.wallet as unknown as { ledger: Ledger }).ledger : null
+  }
+
   leave(): void {
     this.core.leave()
   }
 
   destroy(): void {
+    this.wallet?.destroy()
     this.core.destroy()
   }
 }
